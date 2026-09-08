@@ -273,3 +273,39 @@ export type ProfileOption = {
  * Navigation separator category string
  */
 export const NAV_CATEGORY = "─────────────";
+
+export type SingleProfileExportPayload = {
+  format: "opencode-sdd-profile";
+  version: 1;
+  type: "single";
+  exportedAt: string;
+  name: string;
+  data: ProfileData;
+};
+
+export type BundleProfileExportPayload = {
+  format: "opencode-sdd-profile-bundle";
+  version: 1;
+  type: "bundle";
+  exportedAt: string;
+  activeProfile?: string;
+  profiles: Record<string, ProfileData>;
+};
+
+export type ProfileExportPayload = SingleProfileExportPayload | BundleProfileExportPayload;
+
+export type ImportConflictResolution = "overwrite" | "skip";
+
+export type ImportProfilesResult = {
+  success: boolean;
+  imported: string[];
+  skipped: string[];
+  overwritten: string[];
+  activeProfile?: string;
+  errors?: string[];
+};
+
+export type ParsedProfileImport =
+  | { type: "single"; name?: string; data: ProfileData }
+  | { type: "bundle"; activeProfile?: string; profiles: Record<string, ProfileData> };
+

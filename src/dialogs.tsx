@@ -57,6 +57,13 @@ import {
   activeProfile,
   setActiveProfile,
 } from "./state";
+import {
+  exportProfileToFile,
+  exportAllProfilesToFile,
+  inspectProfileImport,
+  importProfilesFromFile,
+} from "./import-export";
+import type { ImportConflictResolution } from "./types";
 import { createLogger } from "./logger";
 import { canonicalizeProfileModels, getOrchestratorPolicy, type OrchestratorPolicy } from "./orchestrator";
 import { buildPluginHubOptions } from "./plugins/registry";
@@ -102,6 +109,7 @@ const NAV_TEXT = {
   profileManagement: "Gestión de perfiles SDD",
   createProfile: "󰏪 Crear nuevo perfil SDD",
   manageProfiles: "󰓅 Gestionar perfiles SDD",
+  importExport: "󰄠 Importar / Exportar perfiles",
   activate: "Activar",
 } as const;
 
@@ -290,6 +298,12 @@ export function buildProfileDetailHubOptions(api: any, profileOpt: any, profileD
       value: PROFILE_DETAIL_SUBMENU.FALLBACK,
       description: fallbackSummary,
       category: "Navegación",
+    },
+    {
+      title: "📤 Exportar perfil...",
+      value: "__export_profile__",
+      description: "Exporta este perfil a un archivo JSON independiente",
+      category: NAV_CATEGORY,
     },
     { title: "✓ Activar perfil", value: "__assign__", category: NAV_CATEGORY },
     { title: "✕ Eliminar perfil", value: "__delete__", category: NAV_CATEGORY },
@@ -604,6 +618,11 @@ export function showProfilesMenu(api: any) {
           description: "Lista y activa tus perfiles SDD guardados.",
         },
         {
+          title: NAV_TEXT.importExport,
+          value: "import_export",
+          description: "Exporta o importa perfiles individuales o backups completos.",
+        },
+        {
           title: "Plugins",
           value: "plugins",
           description: "Abre el menú de plugins integrados (Suite de Agentes, Task Manager).",
@@ -617,10 +636,296 @@ export function showProfilesMenu(api: any) {
       onSelect={(opt: any) => {
         if (opt.value === "create") showCreateProfile(api);
         else if (opt.value === "list") showProfileListFn(api);
+        else if (opt.value === "import_export") showImportExportMenu(api);
         else if (opt.value === "plugins") showPluginsMenu(api);
         else api.ui.dialog.clear();
       }}
       onCancel={() => api.ui.dialog.clear()}
+    />
+  ));
+}
+
+/**
+ * Displays the Import/Export management menu
+ */
+export function showImportExportMenu(api: any) {
+  safeSetDialogSize(api, "medium");
+  api.ui.dialog.replace(() => (
+    <api.ui.DialogSelect
+      title="Importar / Exportar perfiles SDD"
+      options={[
+        {
+          title: "📦 Exportar todos los perfiles (Bundle)",
+          value: "export_all",
+          description: "Genera un archivo JSON con todos los perfiles y el perfil activo.",
+        },
+        {
+          title: "📄 Exportar un perfil individual",
+          value: "export_single",
+          description: "Selecciona un perfil y expórtalo a un archivo JSON independiente.",
+        },
+        {
+          title: "📥 Importar perfiles desde archivo",
+          value: "import",
+          description: "Importa un perfil suelto o un bundle completo con validación.",
+        },
+        buildBackOption(),
+      ]}
+      onSelect={(opt: any) => {
+        if (opt.value === "export_all") showExportAllProfilesPrompt(api);
+        else if (opt.value === "export_single") showExportSingleProfilePicker(api);
+        else if (opt.value === "import") showImportProfilesPrompt(api);
+        else showProfilesMenuFn(api);
+      }}
+      onCancel={() => showProfilesMenuFn(api)}
+    />
+  ));
+}
+
+export function showExportAllProfilesPrompt(api: any) {
+  safeSetDialogSize(api, "medium");
+  api.ui.dialog.replace(() => (
+    <api.ui.DialogPrompt
+      title="Exportar todos los perfiles"
+      placeholder="./opencode-profiles-bundle.json"
+      onConfirm={(dest: string) => {
+        const trimmed = dest?.trim();
+        const targetPath = path.resolve(trimmed || "./opencode-profiles-bundle.json");
+        try {
+          const currentActive = activeProfile()?.profileName;
+          const result = exportAllProfilesToFile(targetPath, currentActive);
+          api.ui.toast({
+            title: "Exportación exitosa",
+            message: `${result.count} perfiles exportados a ${path.basename(targetPath)}`,
+            variant: "success",
+          });
+          showImportExportMenu(api);
+        } catch (err: any) {
+          log.error("showExportAllProfilesPrompt: failed to export bundle", err);
+          api.ui.toast({
+            title: UI_TEXT.error,
+            message: `Error al exportar bundle: ${err.message}`,
+            variant: "error",
+          });
+          showImportExportMenu(api);
+        }
+      }}
+      onCancel={() => showImportExportMenu(api)}
+    />
+  ));
+}
+
+export function showExportSingleProfilePicker(api: any) {
+  safeSetDialogSize(api, "large");
+  const files = listProfileFiles();
+  if (files.length === 0) {
+    api.ui.toast({
+      title: NAV_TEXT.noProfiles,
+      message: "No hay perfiles guardados para exportar",
+      variant: "info",
+    });
+    showImportExportMenu(api);
+    return;
+  }
+
+  const activeName = activeProfile()?.profileName;
+  const options = files.map((file) => {
+    const name = file.replace(/\.json$/i, "");
+    const isActive = activeName === name;
+    return {
+      title: isActive ? `${name} (Activo)` : name,
+      value: name,
+      description: `Archivo: ${file}`,
+    };
+  });
+
+  api.ui.dialog.replace(() => (
+    <api.ui.DialogSelect
+      title="Selecciona el perfil a exportar"
+      options={[...options, buildBackOption()]}
+      onSelect={(opt: any) => {
+        if (opt.value === "__back__") {
+          showImportExportMenu(api);
+          return;
+        }
+        showExportSingleProfilePrompt(api, opt.value);
+      }}
+      onCancel={() => showImportExportMenu(api)}
+    />
+  ));
+}
+
+export function showExportSingleProfilePrompt(api: any, profileName: string) {
+  safeSetDialogSize(api, "medium");
+  const { profilesDir } = resolvePaths();
+  const profilePath = path.join(profilesDir, `${profileName}.json`);
+
+  api.ui.dialog.replace(() => (
+    <api.ui.DialogPrompt
+      title={`Exportar perfil: ${profileName}`}
+      placeholder={`./${profileName}-profile.json`}
+      onConfirm={(dest: string) => {
+        const trimmed = dest?.trim();
+        const targetPath = path.resolve(trimmed || `./${profileName}-profile.json`);
+        try {
+          const data = readProfileData(profilePath);
+          exportProfileToFile(targetPath, profileName, data);
+          api.ui.toast({
+            title: "Exportación exitosa",
+            message: `Perfil '${profileName}' exportado a ${path.basename(targetPath)}`,
+            variant: "success",
+          });
+          showImportExportMenu(api);
+        } catch (err: any) {
+          log.error(`showExportSingleProfilePrompt: failed to export profile '${profileName}'`, err);
+          api.ui.toast({
+            title: UI_TEXT.error,
+            message: `Error al exportar: ${err.message}`,
+            variant: "error",
+          });
+          showImportExportMenu(api);
+        }
+      }}
+      onCancel={() => showExportSingleProfilePicker(api)}
+    />
+  ));
+}
+
+export function showImportProfilesPrompt(api: any) {
+  safeSetDialogSize(api, "medium");
+  api.ui.dialog.replace(() => (
+    <api.ui.DialogPrompt
+      title="Importar perfiles desde archivo JSON"
+      placeholder="./opencode-profiles-bundle.json"
+      onConfirm={(inputPath: string) => {
+        const trimmed = inputPath?.trim();
+        if (!trimmed) {
+          showImportExportMenu(api);
+          return;
+        }
+        const resolvedPath = path.resolve(trimmed);
+        try {
+          const inspection = inspectProfileImport(resolvedPath);
+          showConfirmImportDialog(api, resolvedPath, inspection);
+        } catch (err: any) {
+          log.error(`showImportProfilesPrompt: failed to inspect import file '${resolvedPath}'`, err);
+          api.ui.toast({
+            title: UI_TEXT.error,
+            message: `Error al leer archivo: ${err.message}`,
+            variant: "error",
+          });
+          showImportExportMenu(api);
+        }
+      }}
+      onCancel={() => showImportExportMenu(api)}
+    />
+  ));
+}
+
+export function showConfirmImportDialog(
+  api: any,
+  resolvedPath: string,
+  inspection: { type: "single" | "bundle"; profileCount: number; profileNames: string[]; activeProfile?: string },
+) {
+  safeSetDialogSize(api, "large");
+  const isBundle = inspection.type === "bundle";
+  const title = isBundle
+    ? `Importar Bundle (${inspection.profileCount} perfiles)`
+    : `Importar Perfil: ${inspection.profileNames[0]}`;
+
+  api.ui.dialog.replace(() => (
+    <api.ui.DialogSelect
+      title={title}
+      options={[
+        {
+          title: "Sobrescribir existentes",
+          value: "overwrite",
+          description: "Importa todos los perfiles, reemplazando los que ya existan.",
+        },
+        {
+          title: "Conservar existentes (Saltear duplicados)",
+          value: "skip",
+          description: "Importa solo los perfiles que no existan previamente.",
+        },
+        {
+          title: "✕ Cancelar",
+          value: "__cancel__",
+          category: NAV_CATEGORY,
+        },
+      ]}
+      onSelect={(opt: any) => {
+        if (opt.value === "__cancel__") {
+          showImportExportMenu(api);
+          return;
+        }
+
+        try {
+          const result = importProfilesFromFile(resolvedPath, {
+            conflictResolution: opt.value as ImportConflictResolution,
+          });
+
+          const parts: string[] = [];
+          if (result.imported.length > 0) parts.push(`${result.imported.length} importados`);
+          if (result.overwritten.length > 0) parts.push(`${result.overwritten.length} sobrescritos`);
+          if (result.skipped.length > 0) parts.push(`${result.skipped.length} salteados`);
+
+          const msg = parts.length > 0 ? parts.join(", ") : "No se modificaron perfiles";
+
+          api.ui.toast({
+            title: result.success ? "Importación exitosa" : "Importación con advertencias",
+            message: msg,
+            variant: result.success ? "success" : "warning",
+          });
+
+          showProfileListFn(api);
+        } catch (err: any) {
+          log.error("showConfirmImportDialog: import failed", err);
+          api.ui.toast({
+            title: UI_TEXT.error,
+            message: `Fallo en la importación: ${err.message}`,
+            variant: "error",
+          });
+          showImportExportMenu(api);
+        }
+      }}
+      onCancel={() => showImportExportMenu(api)}
+    />
+  ));
+}
+
+export function showExportProfile(api: any, profileOpt: any) {
+  safeSetDialogSize(api, "medium");
+  const { profilesDir } = resolvePaths();
+  const profilePath = path.join(profilesDir, profileOpt.value);
+  const profileName = profileOpt.title;
+
+  api.ui.dialog.replace(() => (
+    <api.ui.DialogPrompt
+      title={`Exportar perfil: ${profileName}`}
+      placeholder={`./${profileName}-profile.json`}
+      onConfirm={(dest: string) => {
+        const trimmed = dest?.trim();
+        const targetPath = path.resolve(trimmed || `./${profileName}-profile.json`);
+        try {
+          const data = readProfileData(profilePath);
+          exportProfileToFile(targetPath, profileName, data);
+          api.ui.toast({
+            title: "Exportación exitosa",
+            message: `Perfil exportado a ${path.basename(targetPath)}`,
+            variant: "success",
+          });
+          showProfileDetailFn(api, profileOpt);
+        } catch (err: any) {
+          log.error(`showExportProfile: failed to export profile '${profileName}'`, err);
+          api.ui.toast({
+            title: UI_TEXT.error,
+            message: `Error al exportar: ${err.message}`,
+            variant: "error",
+          });
+          showProfileDetailFn(api, profileOpt);
+        }
+      }}
+      onCancel={() => showProfileDetailFn(api, profileOpt)}
     />
   ));
 }
@@ -793,6 +1098,7 @@ export function createProfileDetailDialogProps(
   const activateProfile = deps?.handleActivateProfile || handleActivateProfile;
   const showDelete = deps?.showDeleteProfile || showDeleteProfile;
   const showRename = deps?.showRenameProfile || showRenameProfile;
+  const showExport = deps?.showExportProfile || showExportProfile;
   const showBulk = deps?.showBulkProfileActions || showBulkProfileActions;
   const showVersions = deps?.showProfileVersions || showProfileVersions;
   const showPrimarySubmenu = deps?.showProfileDetailSubmenuPrimary || showProfileDetailSubmenuPrimary;
@@ -809,6 +1115,7 @@ export function createProfileDetailDialogProps(
       else if (opt.value === "__assign__") activateProfile(api, profilePath, profileOpt.title);
       else if (opt.value === "__delete__") showDelete(api, profileOpt);
       else if (opt.value === "__rename__") showRename(api, profileOpt);
+      else if (opt.value === "__export_profile__") showExport(api, profileOpt);
       else if (opt.value === "__bulk_actions__") showBulk(api, profileOpt);
       else if (opt.value === "__profile_versions__") showVersions(api, profileOpt);
       else {
