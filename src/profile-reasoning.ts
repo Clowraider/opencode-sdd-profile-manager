@@ -129,7 +129,7 @@ export function buildReasoningEditState(
     kind: "selectable",
     agentName,
     modelId,
-    options,
+    options: [PROVIDER_DEFAULT_REASONING_EFFORT, ...options.filter((opt) => opt !== PROVIDER_DEFAULT_REASONING_EFFORT)],
     ...(normalizeReasoningEffortValue(current) ? { current: normalizeReasoningEffortValue(current) } : {}),
   };
 }

@@ -403,10 +403,13 @@ function readProfileDataFromRaw(rawContent: string): ProfileData {
 
   const fallback = extractSddFallbackModels(raw);
   const policy = getOrchestratorPolicy(Object.keys(raw?.agent || raw?.models || raw || {}));
-  const configs = normalizeProfileConfigs(raw?.configs, policy);
+  const configs = normalizeProfileConfigs(raw?.configs, policy, false, fallback);
   const canonicalModels = canonicalizeProfileModels(models, policy);
   const persistedConfigs = configs
-    ? Object.fromEntries(Object.entries(configs).filter(([name]) => Object.hasOwn(canonicalModels, name)))
+    ? Object.fromEntries(Object.entries(configs).filter(([name]) => {
+      const fallbackOwner = deriveFallbackProfileKey(name);
+      return fallbackOwner ? Object.hasOwn(fallback, fallbackOwner) : Object.hasOwn(canonicalModels, name);
+    }))
     : undefined;
   const rawExtras = extractPersistedProfileExtras(raw);
   const extras = isLegacyFlat
@@ -934,12 +937,12 @@ function resolveBulkReasoningEffort(
   context: ModelMutationContext,
   modelId: string,
   selection: string,
-): string {
+): string | undefined {
   if (getReasoningEffortOptions(context.providers as any[], modelId).length === 0) {
-    return "provider-default";
+    return undefined;
   }
   const resolved = resolveReasoningEffortSelection(context.providers as any[], modelId, selection);
-  return resolved.kind === "provider-default" ? "provider-default" : resolved.value;
+  return resolved.kind === "provider-default" ? undefined : resolved.value;
 }
 
 /** Builds the complete next profile without I/O for a runtime-derived bulk request. */
@@ -979,18 +982,31 @@ export function buildBulkProfileOverwrite(
     const configKey = target === BULK_ASSIGNMENT_TARGET.FALLBACK ? `${targetName}-fallback` : targetName;
     if (modelMap[targetName] !== trimmedModelId) modelsAssigned += 1;
     const currentEffort = nextConfigs[configKey]?.reasoningEffort;
-    if (currentEffort !== reasoningEffort) effortsAssigned += 1;
+    if (reasoningEffort) {
+      if (currentEffort !== reasoningEffort) effortsAssigned += 1;
+      nextConfigs[configKey] = { ...nextConfigs[configKey], reasoningEffort };
+    } else {
+      if (currentEffort) effortsAssigned += 1;
+      if (nextConfigs[configKey]) {
+        const { reasoningEffort: _, ...rest } = nextConfigs[configKey];
+        if (Object.keys(rest).length > 0) {
+          nextConfigs[configKey] = rest;
+        } else {
+          delete nextConfigs[configKey];
+        }
+      }
+    }
     modelMap[targetName] = trimmedModelId;
-    nextConfigs[configKey] = { ...nextConfigs[configKey], reasoningEffort };
   }
 
   const { configs: _ignoredConfigs, ...profileWithoutConfigs } = profile || { models: {} };
+  const prunedConfigs = Object.keys(nextConfigs).length > 0 ? nextConfigs : undefined;
   return {
     profile: {
       ...profileWithoutConfigs,
       models: nextModels,
       ...(Object.keys(nextFallback).length > 0 ? { fallback: nextFallback } : {}),
-      ...(Object.keys(nextConfigs).length > 0 ? { configs: nextConfigs } : {}),
+      ...(prunedConfigs ? { configs: prunedConfigs } : {}),
     },
     modelsAssigned,
     effortsAssigned,
@@ -1022,9 +1038,7 @@ export function updateProfileWithBulkOverwrite(
       DEFAULT_PROFILE_VERSION_RETENTION,
       beforeRaw,
     );
-    persistVersionedProfileMutation(profilePath, assignment.profile, version, policy, {
-      preserveProviderDefaultReasoning: true,
-    });
+    persistVersionedProfileMutation(profilePath, assignment.profile, version, policy);
     return { assignment, version };
   });
 }

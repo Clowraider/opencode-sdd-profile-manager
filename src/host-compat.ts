@@ -1,3 +1,4 @@
+import { createRoot, getOwner } from "solid-js";
 import { createLogger } from "./logger";
 import type { DialogSize } from "./types";
 
@@ -19,6 +20,20 @@ const reportedSlotFailures = new Set<string>();
 
 export function getHostVersion(api?: HostApi | null): string {
   return api?.app?.version ?? "unknown";
+}
+
+/**
+ * Renders a host slot by binding to the existing Solid owner when present,
+ * or creating an isolated fallback root bound to plugin disposal when ownerless.
+ */
+export function renderSlot<T>(api: any, label: string, render: () => T): T | null {
+	if (getOwner()) {
+		return safeSlotRender(label, render);
+	}
+	return createRoot((dispose) => {
+		api?.lifecycle?.onDispose?.(dispose);
+		return safeSlotRender(label, render);
+	});
 }
 
 export function safeSlotRender<T>(label: string, render: () => T): T | null {

@@ -1134,14 +1134,12 @@ describe('profiles logic', () => {
       ], 'anthropic/claude-3-5-sonnet', 'high', { providers: [], effortPolicy: 'bulk-compatible-prune' });
 
       expect(result.modelsAssigned).toBe(1);
-      expect(result.effortsAssigned).toBe(1);
+      expect(result.effortsAssigned).toBe(0);
       expect(result.profile.models).toEqual({
         'sdd-apply': 'anthropic/claude-3-5-sonnet',
         compaction: 'internal/compaction',
       });
-      expect(result.profile.configs).toEqual({
-        'sdd-apply': { reasoningEffort: 'provider-default' },
-      });
+      expect(result.profile.configs).toBeUndefined();
     });
 
     it('overwrites fallback models and suffixed efforts without mutating primary models or configs', () => {
@@ -1203,7 +1201,7 @@ describe('profiles logic', () => {
       )).toBe(true);
     });
 
-    it('persists provider-default with the snapshot-backed overwrite transaction', () => {
+    it('omits persisted reasoningEffort and ensures runtime default with snapshot-backed overwrite transaction', () => {
       const writes: Array<{ filePath: string; content: string }> = [];
       vi.mocked(fs.existsSync).mockReturnValue(false);
       vi.mocked(fs.readdirSync).mockReturnValue([] as any);
@@ -1227,8 +1225,91 @@ describe('profiles logic', () => {
       expect(result.version?.beforeRaw).toContain('old/apply');
       expect(JSON.parse(profileWrite!.content)).toEqual({
         models: { 'sdd-apply': 'anthropic/claude-3-5-sonnet' },
-        configs: { 'sdd-apply': { reasoningEffort: 'provider-default' } },
       });
+      expect(profileWrite!.content).not.toContain('provider-default');
+    });
+
+    it('omits persisted reasoningEffort when choosing provider-default on supported model in bulk overwrite', () => {
+      const writes: Array<{ filePath: string; content: string }> = [];
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      vi.mocked(fs.readdirSync).mockReturnValue([] as any);
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+        models: { 'sdd-apply': 'openai/old' },
+        configs: { 'sdd-apply': { reasoningEffort: 'low' } },
+      }));
+      vi.mocked(fs.writeFileSync).mockImplementation((filePath: any, content: any) => {
+        writes.push({ filePath: toPosix(filePath), content: String(content) });
+      });
+
+      const result = updateProfileWithBulkOverwrite(
+        '/mock/profiles/team.json',
+        [{ field: 'model', profileKey: 'sdd-apply' }],
+        'openai/o3-mini',
+        'provider-default',
+        {
+          providers: [{
+            id: 'openai',
+            models: {
+              'o3-mini': {
+                capabilities: { reasoning: true },
+                variants: { high: { reasoningEffort: 'high' } },
+              },
+            },
+          }],
+          effortPolicy: 'bulk-compatible-prune',
+        },
+      );
+
+      expect(result.assignment.effortsAssigned).toBe(1);
+      const profileWrite = writes.find(({ filePath }) => filePath.includes('/mock/profiles/team.json.tmp-'));
+      expect(JSON.parse(profileWrite!.content)).toEqual({
+        models: { 'sdd-apply': 'openai/o3-mini' },
+      });
+      expect(profileWrite!.content).not.toContain('provider-default');
+      expect(profileWrite!.content).not.toContain('Predeterminado');
+    });
+
+    it('omits fallback reasoningEffort when choosing provider-default in fallback bulk overwrite', () => {
+      const writes: Array<{ filePath: string; content: string }> = [];
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      vi.mocked(fs.readdirSync).mockReturnValue([] as any);
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+        models: { 'sdd-apply': 'openai/gpt-5' },
+        fallback: { 'sdd-apply': 'openai/old' },
+        configs: { 'sdd-apply-fallback': { reasoningEffort: 'high' } },
+      }));
+      vi.mocked(fs.writeFileSync).mockImplementation((filePath: any, content: any) => {
+        writes.push({ filePath: toPosix(filePath), content: String(content) });
+      });
+
+      const result = updateProfileWithBulkOverwrite(
+        '/mock/profiles/team.json',
+        [{ field: 'fallback', profileKey: 'sdd-apply' }],
+        'openai/o3-mini',
+        'provider-default',
+        {
+          providers: [{
+            id: 'openai',
+            models: {
+              'o3-mini': {
+                capabilities: { reasoning: true },
+                variants: { high: { reasoningEffort: 'high' } },
+              },
+            },
+          }],
+          effortPolicy: 'bulk-compatible-prune',
+        },
+        undefined,
+        BULK_ASSIGNMENT_TARGET.FALLBACK,
+      );
+
+      expect(result.assignment.effortsAssigned).toBe(1);
+      const profileWrite = writes.find(({ filePath }) => filePath.includes('/mock/profiles/team.json.tmp-'));
+      expect(JSON.parse(profileWrite!.content)).toEqual({
+        models: { 'sdd-apply': 'openai/gpt-5' },
+        fallback: { 'sdd-apply': 'openai/o3-mini' },
+      });
+      expect(profileWrite!.content).not.toContain('sdd-apply-fallback');
     });
 
     it('creates the snapshot before one profile write and compensates the snapshot when that write fails', () => {

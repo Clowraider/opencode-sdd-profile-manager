@@ -24,9 +24,9 @@ import {
 } from "./src/dialogs";
 import {
 	getHostVersion,
+	renderSlot,
 	safeHostAction,
 	safeHostAsyncAction,
-	safeSlotRender,
 } from "./src/host-compat";
 import { createLogger } from "./src/logger";
 import { getOrchestratorPolicy } from "./src/orchestrator";
@@ -159,13 +159,6 @@ function registerProfilesCommand(api: any, bindings: string[]) {
 			]);
 			api.lifecycle.onDispose(disposeLegacy);
 		}
-	});
-}
-
-function renderSlot(api: any, label: string, render: () => any) {
-	return createRoot((dispose) => {
-		api.lifecycle.onDispose(dispose);
-		return safeSlotRender(label, render);
 	});
 }
 
