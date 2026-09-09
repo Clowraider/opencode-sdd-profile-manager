@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BULK_ASSIGNMENT_MODE, BULK_ASSIGNMENT_TARGET, PROFILE_VERSION_SOURCE } from './types';
-import { buildBulkProfileActionOptions, buildProfileVersionListOption, createFallbackSubmenuDialogProps, createPrimarySubmenuDialogProps, createReasoningSubmenuDialogProps, formatProfileVersionPreviewLines } from './dialogs';
+import { buildBulkProfileActionOptions, buildProfileVersionListOption, collectBulkActionTargets, createFallbackSubmenuDialogProps, createPrimarySubmenuDialogProps, createReasoningSubmenuDialogProps, formatProfileVersionPreviewLines, getBulkChangedAgentCount } from './dialogs';
 import { buildProfileAgentRows, buildProfileListOptions, createProfileListDialogProps, resolvePersistedActiveProfileFile } from './dialogs';
 import { buildProfileDetailAgentSections, resolveRuntimeOrchestratorPolicy, buildReasoningRowForAgent, buildReasoningBlockedMessage } from './dialogs';
 import { resolveProfileDetailSelectionAction, wrapDisplayText, sanitizeMemoryDisplayText } from './dialogs';
@@ -169,10 +169,10 @@ describe('dialog pure builders', () => {
     ]);
   });
 
-  it('exposes exactly two Spanish bulk actions without confirmation metadata', () => {
+  it('exposes all-agent actions plus catalog-derived primary group actions without confirmation metadata', () => {
     const options = buildBulkProfileActionOptions();
 
-    expect(options).toEqual([
+    expect(options.slice(0, 2)).toEqual([
       {
         title: 'Asignar un modelo y esfuerzo a todos los agentes',
         value: 'bulk:assign-model-and-effort',
@@ -184,6 +184,40 @@ describe('dialog pure builders', () => {
         target: BULK_ASSIGNMENT_TARGET.FALLBACK,
       },
     ]);
+    expect(options.slice(2)).toEqual(CATALOG_GROUPS.map((group) => ({
+      title: `Asignar modelo y esfuerzo al grupo ${group.labelEs}`,
+      value: `bulk:assign-model-and-effort:group:${group.id}`,
+      target: BULK_ASSIGNMENT_TARGET.PRIMARY,
+      groupId: group.id,
+      groupLabel: group.labelEs,
+    })));
+  });
+
+  it('filters a catalog group to valid runtime primary targets and preserves orchestrator aliases', () => {
+    const config = { agent: {
+      'gentle-orchestrator': {},
+      'sdd-init': {},
+      'sdd-apply': {},
+      'sdd-design-fallback': {},
+      compaction: {},
+    } };
+
+    expect(collectBulkActionTargets(config, { target: 'primary', groupId: 'sdd-core' })).toEqual([
+      { profileKey: 'sdd-init', field: 'model' },
+      { profileKey: 'sdd-apply', field: 'model' },
+    ]);
+    expect(collectBulkActionTargets(config, { target: 'primary', groupId: 'orchestrator' })).toEqual([
+      { profileKey: 'gentle-orchestrator', field: 'model' },
+    ]);
+    expect(collectBulkActionTargets({ agent: { 'sdd-orchestrator': {} } }, { target: 'primary', groupId: 'orchestrator' })).toEqual([
+      { profileKey: 'sdd-orchestrator', field: 'model' },
+    ]);
+    expect(collectBulkActionTargets(config, { target: 'primary', groupId: 'unknown' })).toEqual([]);
+  });
+
+  it('reports distinct changed agents for effort-only and combined bulk changes', () => {
+    expect(getBulkChangedAgentCount({ modelsAssigned: 0, effortsAssigned: 2, agentsChanged: 2 })).toBe(2);
+    expect(getBulkChangedAgentCount({ modelsAssigned: 2, effortsAssigned: 2, agentsChanged: 2 })).toBe(2);
   });
 
   it('formats profile version previews with date, operation, assignments, and raw excerpt', () => {
@@ -943,6 +977,85 @@ describe('dialog pure builders', () => {
         message: '7 agentes configurados con openai/gpt-5 y esfuerzo Predeterminado. Versión guardada.',
         variant: 'success',
       });
+      expect(showDetail).toHaveBeenCalledWith(api, profileOpt);
+    });
+
+    it('commits a primary group overwrite with only runtime-valid group targets and group version metadata', () => {
+      const api = createFlowApi();
+      api.state.config.agent = {
+        'sdd-init': {},
+        'sdd-apply': {},
+        'review-risk': {},
+      } as any;
+      const updateBulk = vi.fn().mockReturnValue({ assignment: { modelsAssigned: 2, effortsAssigned: 2, changed: true } });
+      const showDetail = vi.fn();
+      const action = buildBulkProfileActionOptions().find((option) => option.groupId === 'sdd-core')!;
+      const props = createBulkReasoningEffortPickerDialogProps(
+        api,
+        profileOpt,
+        'openai/gpt-5',
+        'primary',
+        { updateProfileWithBulkOverwrite: updateBulk, showProfileDetail: showDetail },
+        action,
+      );
+
+      props.onSelect({ value: 'high' });
+
+      expect(updateBulk).toHaveBeenCalledWith(
+        expect.any(String),
+        [
+          { profileKey: 'sdd-init', field: 'model' },
+          { profileKey: 'sdd-apply', field: 'model' },
+        ],
+        'openai/gpt-5',
+        'high',
+        expect.anything(),
+        expect.anything(),
+        BULK_ASSIGNMENT_TARGET.PRIMARY,
+        { groupId: 'sdd-core', groupLabel: 'Núcleo SDD' },
+      );
+      expect(api.ui.toast).toHaveBeenCalledWith(expect.objectContaining({
+        message: '2 agentes de Núcleo SDD configurados con openai/gpt-5 y esfuerzo high. Versión guardada.',
+      }));
+      expect(showDetail).toHaveBeenCalledWith(api, profileOpt);
+    });
+
+    it('reports effort-only group changes as a successful distinct-agent update', () => {
+      const api = createFlowApi();
+      const updateBulk = vi.fn().mockReturnValue({ assignment: { modelsAssigned: 0, effortsAssigned: 2, agentsChanged: 2, changed: true } });
+      const showDetail = vi.fn();
+      const action = buildBulkProfileActionOptions().find((option) => option.groupId === 'sdd-core')!;
+      const props = createBulkReasoningEffortPickerDialogProps(api, profileOpt, 'openai/gpt-5', 'primary', {
+        collectConfigurableProfileTargets: vi.fn(() => [
+          { profileKey: 'sdd-init', field: 'model' as const },
+          { profileKey: 'sdd-apply', field: 'model' as const },
+        ]),
+        updateProfileWithBulkOverwrite: updateBulk,
+        showProfileDetail: showDetail,
+      }, action);
+
+      props.onSelect({ value: 'high' });
+
+      expect(api.ui.toast).toHaveBeenCalledWith({
+        title: 'Actualizado',
+        message: '2 agentes de Núcleo SDD configurados con openai/gpt-5 y esfuerzo high. Versión guardada.',
+        variant: 'success',
+      });
+    });
+
+    it('does not persist an unknown group action', () => {
+      const api = createFlowApi();
+      const updateBulk = vi.fn();
+      const showDetail = vi.fn();
+      const props = createBulkReasoningEffortPickerDialogProps(api, profileOpt, 'openai/gpt-5', 'primary', {
+        updateProfileWithBulkOverwrite: updateBulk,
+        showProfileDetail: showDetail,
+      }, { title: 'Unknown', value: 'unknown', target: 'primary', groupId: 'unknown', groupLabel: 'Unknown' });
+
+      props.onSelect({ value: 'high' });
+
+      expect(updateBulk).not.toHaveBeenCalled();
+      expect(api.ui.toast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Sin cambios', variant: 'warning' }));
       expect(showDetail).toHaveBeenCalledWith(api, profileOpt);
     });
 

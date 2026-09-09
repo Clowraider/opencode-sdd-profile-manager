@@ -24,6 +24,7 @@ import {
   BULK_ASSIGNMENT_MODE,
   BULK_ASSIGNMENT_TARGET,
   BulkAssignmentOperation,
+  BulkAssignmentGroupMetadata,
   BulkProfileVersionOperation,
   PhaseProfileVersionOperation,
   PROFILE_PHASE_MODEL_FIELD,
@@ -635,11 +636,19 @@ function normalizePersistedBulkVersionOperation(operation: unknown): BulkProfile
   ) {
     return null;
   }
+  if (
+    (operation.groupId !== undefined && (typeof operation.groupId !== "string" || !operation.groupId.trim())) ||
+    (operation.groupLabel !== undefined && (typeof operation.groupLabel !== "string" || !operation.groupLabel.trim()))
+  ) {
+    return null;
+  }
 
   return normalizeBulkVersionOperation(
     {
       target: operation.target,
       mode: operation.mode,
+      ...(typeof operation.groupId === "string" ? { groupId: operation.groupId.trim() } : {}),
+      ...(typeof operation.groupLabel === "string" ? { groupLabel: operation.groupLabel.trim() } : {}),
     },
     typeof operation.changedPhases === "number" ? operation.changedPhases : undefined
   );
@@ -966,27 +975,38 @@ export function buildBulkProfileOverwrite(
   const nextConfigs = { ...profile?.configs };
   let modelsAssigned = 0;
   let effortsAssigned = 0;
+  const changedAgents = new Set<string>();
 
   for (const profileTarget of uniqueTargets) {
     if ((target === BULK_ASSIGNMENT_TARGET.FALLBACK) !== (profileTarget.field === "fallback")) continue;
-    const targetName = policy.aliasNames.includes(profileTarget.profileKey as any)
+    const isOrchestrator = policy.aliasNames.includes(profileTarget.profileKey as any);
+    const targetName = isOrchestrator
       ? policy.canonicalName
       : profileTarget.profileKey;
-    if (target === BULK_ASSIGNMENT_TARGET.PRIMARY && policy.aliasNames.includes(profileTarget.profileKey as any)) {
+    const modelMap = target === BULK_ASSIGNMENT_TARGET.FALLBACK ? nextFallback : nextModels;
+    const currentModel = target === BULK_ASSIGNMENT_TARGET.PRIMARY && isOrchestrator
+      ? policy.aliasNames.map((aliasName) => nextModels[aliasName]).find((value) => typeof value === "string")
+      : modelMap[targetName];
+    const modelChanged = currentModel !== trimmedModelId;
+    const configKey = target === BULK_ASSIGNMENT_TARGET.FALLBACK ? `${targetName}-fallback` : targetName;
+    const currentEffort = target === BULK_ASSIGNMENT_TARGET.PRIMARY && isOrchestrator
+      ? policy.aliasNames.map((aliasName) => nextConfigs[aliasName]?.reasoningEffort).find((value) => typeof value === "string")
+      : nextConfigs[configKey]?.reasoningEffort;
+    if (target === BULK_ASSIGNMENT_TARGET.PRIMARY && isOrchestrator) {
       for (const aliasName of policy.aliasNames) {
         delete nextModels[aliasName];
         delete nextConfigs[aliasName];
       }
     }
-    const modelMap = target === BULK_ASSIGNMENT_TARGET.FALLBACK ? nextFallback : nextModels;
-    const configKey = target === BULK_ASSIGNMENT_TARGET.FALLBACK ? `${targetName}-fallback` : targetName;
-    if (modelMap[targetName] !== trimmedModelId) modelsAssigned += 1;
-    const currentEffort = nextConfigs[configKey]?.reasoningEffort;
+    if (modelChanged) modelsAssigned += 1;
+    let effortChanged = false;
     if (reasoningEffort) {
-      if (currentEffort !== reasoningEffort) effortsAssigned += 1;
+      effortChanged = currentEffort !== reasoningEffort;
+      if (effortChanged) effortsAssigned += 1;
       nextConfigs[configKey] = { ...nextConfigs[configKey], reasoningEffort };
     } else {
-      if (currentEffort) effortsAssigned += 1;
+      effortChanged = Boolean(currentEffort);
+      if (effortChanged) effortsAssigned += 1;
       if (nextConfigs[configKey]) {
         const { reasoningEffort: _, ...rest } = nextConfigs[configKey];
         if (Object.keys(rest).length > 0) {
@@ -997,6 +1017,7 @@ export function buildBulkProfileOverwrite(
       }
     }
     modelMap[targetName] = trimmedModelId;
+    if (modelChanged || effortChanged) changedAgents.add(`${target}:${targetName}`);
   }
 
   const { configs: _ignoredConfigs, ...profileWithoutConfigs } = profile || { models: {} };
@@ -1010,7 +1031,8 @@ export function buildBulkProfileOverwrite(
     },
     modelsAssigned,
     effortsAssigned,
-    changed: modelsAssigned > 0 || effortsAssigned > 0,
+    agentsChanged: changedAgents.size,
+    changed: changedAgents.size > 0,
   };
 }
 
@@ -1023,6 +1045,7 @@ export function updateProfileWithBulkOverwrite(
   context: ModelMutationContext,
   runtimePolicy?: OrchestratorPolicy,
   target: "primary" | "fallback" = BULK_ASSIGNMENT_TARGET.PRIMARY,
+  group?: BulkAssignmentGroupMetadata,
 ): { assignment: BulkProfileOverwriteResult; version?: ProfileVersion } {
   return withFileLock(profilePath, () => {
     const beforeRaw = fs.readFileSync(profilePath, "utf-8").toString();
@@ -1033,8 +1056,10 @@ export function updateProfileWithBulkOverwrite(
 
     const version = createProfileVersion(
       profilePath,
-      normalizeBulkVersionOperation({ target, mode: BULK_ASSIGNMENT_MODE.OVERWRITE }, assignment.modelsAssigned),
-      `Override ${assignment.modelsAssigned} configurable ${target} agents`,
+      normalizeBulkVersionOperation({ target, mode: BULK_ASSIGNMENT_MODE.OVERWRITE, ...group }, assignment.agentsChanged),
+      group?.groupLabel
+        ? `Override ${assignment.agentsChanged} configurable primary agents in ${group.groupLabel}`
+        : `Override ${assignment.agentsChanged} configurable ${target} agents`,
       DEFAULT_PROFILE_VERSION_RETENTION,
       beforeRaw,
     );

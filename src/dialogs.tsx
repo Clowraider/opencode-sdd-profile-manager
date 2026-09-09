@@ -18,6 +18,8 @@ import {
   type AgentFamily,
   type ModelMutationContext,
   type BulkAssignmentTarget,
+  type BulkProfileOverwriteResult,
+  type ConfigurableProfileTarget,
 } from "./types";
 import {
   resolveModelInfo,
@@ -537,6 +539,8 @@ export type BulkProfileActionOption = {
   title: string;
   value: string;
   target?: "primary" | "fallback";
+  groupId?: string;
+  groupLabel?: string;
 };
 
 export function buildBulkProfileActionOptions(): BulkProfileActionOption[] {
@@ -551,7 +555,51 @@ export function buildBulkProfileActionOptions(): BulkProfileActionOption[] {
       value: "bulk:assign-model-and-effort:fallback",
       target: "fallback",
     },
+    ...CATALOG_GROUPS.map((group) => ({
+      title: `Asignar modelo y esfuerzo al grupo ${group.labelEs}`,
+      value: `bulk:assign-model-and-effort:group:${group.id}`,
+      target: "primary" as const,
+      groupId: group.id,
+      groupLabel: group.labelEs,
+    })),
   ];
+}
+
+export function collectBulkActionTargets(
+  config: unknown,
+  action: Pick<BulkProfileActionOption, "target" | "groupId">,
+  collectTargets: typeof collectConfigurableProfileTargets = collectConfigurableProfileTargets,
+): ConfigurableProfileTarget[] {
+  const target = action.target || "primary";
+  const targets = collectTargets(config, target);
+  if (!action.groupId) return targets;
+
+  const group = CATALOG_GROUPS.find((candidate) => candidate.id === action.groupId);
+  if (!group || target !== "primary") return [];
+  const policy = resolveRuntimeOrchestratorPolicy(config);
+  const groupKeys = new Set<string>(group.agents);
+  if ((group.agents as readonly string[]).includes("sdd-ORCHETATOR")) {
+    for (const alias of policy.aliasNames) groupKeys.add(alias);
+  }
+  const filteredTargets = targets.filter((profileTarget) =>
+    profileTarget.field === "model" && groupKeys.has(profileTarget.profileKey)
+  );
+  const runtimeAgents = (config && typeof config === "object" && !Array.isArray(config) &&
+    "agent" in config && config.agent && typeof config.agent === "object" && !Array.isArray(config.agent))
+    ? config.agent as Record<string, unknown>
+    : {};
+  if (
+    (group.agents as readonly string[]).includes("sdd-ORCHETATOR") &&
+    Object.prototype.hasOwnProperty.call(runtimeAgents, policy.canonicalName) &&
+    !filteredTargets.some((profileTarget) => profileTarget.profileKey === policy.canonicalName)
+  ) {
+    filteredTargets.push({ field: "model", profileKey: policy.canonicalName });
+  }
+  return filteredTargets;
+}
+
+export function getBulkChangedAgentCount(assignment: Pick<BulkProfileOverwriteResult, "modelsAssigned" | "effortsAssigned"> & { agentsChanged?: number }): number {
+  return assignment.agentsChanged ?? Math.max(assignment.modelsAssigned, assignment.effortsAssigned);
 }
 
 export function formatProfileVersionPreviewLines(version: ProfileVersion): string[] {
@@ -1229,7 +1277,7 @@ export type DialogFlowDependencies = {
   collectConfigurableProfileTargets?: typeof collectConfigurableProfileTargets;
   bulkTarget?: BulkAssignmentTarget;
   showProviderPickerForBulkProfilePhases?: (api: any, profileOpt: any, action: any) => void;
-  showBulkReasoningEffortPicker?: (api: any, profileOpt: any, modelId: string, target?: "primary" | "fallback") => void;
+  showBulkReasoningEffortPicker?: (api: any, profileOpt: any, modelId: string, target?: "primary" | "fallback", action?: BulkProfileActionOption) => void;
 };
 
 export function buildModelMutationContext(api: any, mode: ModelSelectionMode): ModelMutationContext {
@@ -1294,16 +1342,22 @@ export function createBulkModelSelectionHandler(
   api: any,
   profileOpt: any,
   fullModelId: string,
-  targetOrDeps: "primary" | "fallback" | DialogFlowDependencies = "primary",
+  targetOrActionOrDeps: "primary" | "fallback" | BulkProfileActionOption | DialogFlowDependencies = "primary",
   depsArg: DialogFlowDependencies = {},
 ) {
-  const deps = typeof targetOrDeps === "string" ? depsArg : targetOrDeps;
-  const target = typeof targetOrDeps === "string" ? targetOrDeps : "primary";
+  const isAction = typeof targetOrActionOrDeps === "object" && "value" in targetOrActionOrDeps;
+  const deps = typeof targetOrActionOrDeps === "string" || isAction ? depsArg : targetOrActionOrDeps;
+  const action = isAction ? targetOrActionOrDeps : undefined;
+  const target = typeof targetOrActionOrDeps === "string" ? targetOrActionOrDeps : action?.target || "primary";
+  const groupAction = action?.groupId ? action : undefined;
   const showEffortPicker = deps.showBulkReasoningEffortPicker || showBulkReasoningEffortPicker;
 
-  return () => target === "fallback"
-    ? showEffortPicker(api, profileOpt, fullModelId, target)
-    : showEffortPicker(api, profileOpt, fullModelId);
+  return () => {
+    if (groupAction) return showEffortPicker(api, profileOpt, fullModelId, target, groupAction);
+    return target === "fallback"
+      ? showEffortPicker(api, profileOpt, fullModelId, target)
+      : showEffortPicker(api, profileOpt, fullModelId);
+  };
 }
 
 export function createBulkReasoningEffortPickerDialogProps(
@@ -1312,6 +1366,7 @@ export function createBulkReasoningEffortPickerDialogProps(
   modelId: string,
   targetOrDeps: "primary" | "fallback" | DialogFlowDependencies = "primary",
   depsArg: DialogFlowDependencies = {},
+  action?: BulkProfileActionOption,
 ) {
   const deps = typeof targetOrDeps === "string" ? depsArg : targetOrDeps;
   const updateBulk = deps.updateProfileWithBulkOverwrite || updateProfileWithBulkOverwrite;
@@ -1324,7 +1379,7 @@ export function createBulkReasoningEffortPickerDialogProps(
   const state = buildReasoningEditState(api?.state?.provider || [], "sdd-spec", modelId);
 
   return {
-    title: `${UI_TEXT.reasoningEffort} › Todos los agentes`,
+    title: `${UI_TEXT.reasoningEffort} › ${action?.groupLabel || "Todos los agentes"}`,
     options: [
       ...(state?.options || []).map((value: string) => ({ title: localizedEffortLabel(value), value })),
       buildBackOption(),
@@ -1335,20 +1390,33 @@ export function createBulkReasoningEffortPickerDialogProps(
         return;
       }
       try {
-        const result = updateBulk(
-          profilePath,
-          collectTargets(api.state.config, resolvedTarget as any),
-          modelId,
-          opt.value,
-          buildBulkModelMutationContext(api, runtimePrimaryNames),
-          resolveRuntimeOrchestratorPolicy(api.state.config),
-          ...(resolvedTarget === "fallback" ? ["fallback" as const] : []),
-        );
-        const totalAssigned = result.assignment?.modelsAssigned || 0;
+        const targets = action?.groupId
+          ? collectBulkActionTargets(api.state.config, action, collectTargets)
+          : collectTargets(api.state.config, resolvedTarget as any);
+        if (action?.groupId && targets.length === 0) {
+          api.ui.toast({
+            title: UI_TEXT.noChanges,
+            message: "No hay agentes configurables que actualizar",
+            variant: "warning",
+          });
+          showDetail(api, profileOpt);
+          return;
+        }
+        const context = buildBulkModelMutationContext(api, runtimePrimaryNames);
+        const policy = resolveRuntimeOrchestratorPolicy(api.state.config);
+        const result = action?.groupId
+          ? updateBulk(profilePath, targets, modelId, opt.value, context, policy, "primary", {
+              groupId: action.groupId,
+              groupLabel: action.groupLabel,
+            })
+          : resolvedTarget === "fallback"
+            ? updateBulk(profilePath, targets, modelId, opt.value, context, policy, "fallback")
+            : updateBulk(profilePath, targets, modelId, opt.value, context, policy);
+        const totalAssigned = getBulkChangedAgentCount(result.assignment);
         api.ui.toast({
           title: totalAssigned > 0 ? UI_TEXT.updated : UI_TEXT.noChanges,
           message: totalAssigned > 0
-            ? `${totalAssigned} agentes configurados con ${modelId} y esfuerzo ${localizedEffortLabel(opt.value)}. Versión guardada.`
+            ? `${totalAssigned} agentes${action?.groupLabel ? ` de ${action.groupLabel}` : ""} configurados con ${modelId} y esfuerzo ${localizedEffortLabel(opt.value)}. Versión guardada.`
             : "No hay agentes configurables que actualizar",
           variant: totalAssigned > 0 ? "success" : "warning",
         });
@@ -1592,7 +1660,7 @@ export function createBulkModelPickerDialogProps(
   const modelKeys = Object.keys(models);
   const showProvider = deps.showProviderPickerForBulkProfilePhases || showProviderPickerForBulkProfilePhases;
   const onModelSelected = deps.onModelSelected || ((modelId: string) =>
-    createBulkModelSelectionHandler(api, profileOpt, modelId, action.target || "primary", deps)());
+    createBulkModelSelectionHandler(api, profileOpt, modelId, action, deps)());
 
   return {
     title: `${provider.name || provider.id} › ${action.title}`,
@@ -1616,7 +1684,7 @@ export function showModelPickerForBulkProfilePhases(api: any, profileOpt: any, p
   safeSetDialogSize(api, "xlarge");
   api.ui.dialog.replace(() => (
     <api.ui.DialogSelect {...createBulkModelPickerDialogProps(api, profileOpt, provider, action, {
-      onModelSelected: (modelId) => createBulkModelSelectionHandler(api, profileOpt, modelId, action.target || "primary")(),
+      onModelSelected: (modelId) => createBulkModelSelectionHandler(api, profileOpt, modelId, action)(),
     })} />
   ));
 }
@@ -1626,9 +1694,10 @@ export function showBulkReasoningEffortPicker(
   profileOpt: any,
   modelId: string,
   target: "primary" | "fallback" = "primary",
+  action?: BulkProfileActionOption,
 ) {
   api.ui.dialog.replace(() => (
-    <api.ui.DialogSelect {...createBulkReasoningEffortPickerDialogProps(api, profileOpt, modelId, target)} />
+    <api.ui.DialogSelect {...createBulkReasoningEffortPickerDialogProps(api, profileOpt, modelId, target, {}, action)} />
   ));
 }
 

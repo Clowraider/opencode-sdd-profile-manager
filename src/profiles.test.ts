@@ -1102,6 +1102,7 @@ describe('profiles logic', () => {
 
       expect(result.modelsAssigned).toBe(7);
       expect(result.effortsAssigned).toBe(7);
+      expect(result.agentsChanged).toBe(7);
       expect(result.profile.models).toMatchObject({
         'gentle-orchestrator': 'openai/o3-mini',
         'sdd-apply': 'openai/o3-mini',
@@ -1123,6 +1124,31 @@ describe('profiles logic', () => {
       });
       expect(result.profile.configs?.compaction).toEqual({ reasoningEffort: 'low' });
       expect(profile.models['sdd-apply']).toBe('old/apply');
+    });
+
+    it('counts effort-only primary group changes once per agent and leaves fallback state unchanged', () => {
+      const profile = {
+        models: { 'sdd-init': 'openai/o3-mini', 'sdd-apply': 'openai/o3-mini' },
+        fallback: { 'sdd-init': 'fallback/init', 'sdd-apply': 'fallback/apply' },
+        configs: {
+          'sdd-init': { reasoningEffort: 'low' },
+          'sdd-apply': { reasoningEffort: 'low' },
+          'sdd-init-fallback': { reasoningEffort: 'medium' },
+          'sdd-apply-fallback': { reasoningEffort: 'medium' },
+        },
+      } as ProfileData;
+      const result = buildBulkProfileOverwrite(profile, [
+        { field: 'model', profileKey: 'sdd-init' },
+        { field: 'model', profileKey: 'sdd-apply' },
+      ], 'openai/o3-mini', 'high', {
+        providers: [{ id: 'openai', models: { 'o3-mini': { capabilities: { reasoning: true }, variants: { high: { reasoningEffort: 'high' } } } } }],
+        effortPolicy: 'bulk-compatible-prune',
+      });
+
+      expect(result).toMatchObject({ modelsAssigned: 0, effortsAssigned: 2, agentsChanged: 2, changed: true });
+      expect(result.profile.fallback).toEqual(profile.fallback);
+      expect(result.profile.configs?.['sdd-init-fallback']).toEqual({ reasoningEffort: 'medium' });
+      expect(result.profile.configs?.['sdd-apply-fallback']).toEqual({ reasoningEffort: 'medium' });
     });
 
     it('uses provider-default for unsupported reasoning and deduplicates target field/profile-key pairs', () => {
@@ -1227,6 +1253,89 @@ describe('profiles logic', () => {
         models: { 'sdd-apply': 'anthropic/claude-3-5-sonnet' },
       });
       expect(profileWrite!.content).not.toContain('provider-default');
+    });
+
+    it('persists restorable group metadata and a meaningful group summary for primary overwrites', () => {
+      const writes: Array<{ filePath: string; content: string }> = [];
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      vi.mocked(fs.readdirSync).mockReturnValue([] as any);
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+        models: { 'sdd-init': 'old/init', 'sdd-apply': 'old/apply' },
+        fallback: { 'sdd-init': 'fallback/init' },
+      }));
+      vi.mocked(fs.writeFileSync).mockImplementation((filePath: any, content: any) => {
+        writes.push({ filePath: toPosix(filePath), content: String(content) });
+      });
+
+      const result = updateProfileWithBulkOverwrite(
+        '/mock/profiles/team.json',
+        [
+          { field: 'model', profileKey: 'sdd-init' },
+          { field: 'model', profileKey: 'sdd-apply' },
+        ],
+        'openai/o3-mini',
+        'provider-default',
+        { providers: [], effortPolicy: 'bulk-compatible-prune' },
+        undefined,
+        BULK_ASSIGNMENT_TARGET.PRIMARY,
+        { groupId: 'sdd-core', groupLabel: 'Núcleo SDD' },
+      );
+
+      expect(result.version?.operation).toMatchObject({
+        source: PROFILE_VERSION_SOURCE.BULK,
+        target: BULK_ASSIGNMENT_TARGET.PRIMARY,
+        mode: BULK_ASSIGNMENT_MODE.OVERWRITE,
+        changedPhases: 2,
+        groupId: 'sdd-core',
+        groupLabel: 'Núcleo SDD',
+      });
+      expect(result.version?.operationSummary).toBe('Override 2 configurable primary agents in Núcleo SDD');
+      expect(result.version?.beforeRaw).toContain('fallback/init');
+      const persistedVersion = writes.find(({ filePath }) => filePath.includes('/profile-versions/team.json/'));
+      expect(JSON.parse(persistedVersion!.content).operation.groupId).toBe('sdd-core');
+    });
+
+    it('versions effort-only group overwrites with the distinct changed-agent count', () => {
+      const writes: Array<{ filePath: string; content: string }> = [];
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      vi.mocked(fs.readdirSync).mockReturnValue([] as any);
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+        models: { 'sdd-init': 'openai/o3-mini', 'sdd-apply': 'openai/o3-mini' },
+        fallback: { 'sdd-init': 'fallback/init' },
+        configs: {
+          'sdd-init': { reasoningEffort: 'low' },
+          'sdd-apply': { reasoningEffort: 'low' },
+          'sdd-init-fallback': { reasoningEffort: 'medium' },
+        },
+      }));
+      vi.mocked(fs.writeFileSync).mockImplementation((filePath: any, content: any) => {
+        writes.push({ filePath: toPosix(filePath), content: String(content) });
+      });
+
+      const result = updateProfileWithBulkOverwrite(
+        '/mock/profiles/team.json',
+        [
+          { field: 'model', profileKey: 'sdd-init' },
+          { field: 'model', profileKey: 'sdd-apply' },
+        ],
+        'openai/o3-mini',
+        'high',
+        {
+          providers: [{ id: 'openai', models: { 'o3-mini': { capabilities: { reasoning: true }, variants: { high: { reasoningEffort: 'high' } } } } }],
+          effortPolicy: 'bulk-compatible-prune',
+        },
+        undefined,
+        BULK_ASSIGNMENT_TARGET.PRIMARY,
+        { groupId: 'sdd-core', groupLabel: 'Núcleo SDD' },
+      );
+
+      expect(result.assignment).toMatchObject({ modelsAssigned: 0, effortsAssigned: 2, agentsChanged: 2 });
+      expect(result.version?.operation).toMatchObject({ changedPhases: 2, groupId: 'sdd-core' });
+      expect(result.version?.operationSummary).toBe('Override 2 configurable primary agents in Núcleo SDD');
+      const profileWrite = writes.find(({ filePath }) => filePath.includes('/mock/profiles/team.json.tmp-'));
+      expect(JSON.parse(profileWrite!.content)).toMatchObject({
+        fallback: { 'sdd-init': 'fallback/init' },
+      });
     });
 
     it('omits persisted reasoningEffort when choosing provider-default on supported model in bulk overwrite', () => {

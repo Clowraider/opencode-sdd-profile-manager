@@ -164,7 +164,11 @@ export type StagedModelSelection = {
 export type BulkProfileVersionOperation = BulkAssignmentOperation & {
   source: typeof PROFILE_VERSION_SOURCE.BULK;
   changedPhases?: number;
+  groupId?: string;
+  groupLabel?: string;
 };
+
+export type BulkAssignmentGroupMetadata = Pick<BulkProfileVersionOperation, "groupId" | "groupLabel">;
 
 export type PhaseProfileVersionOperation = {
   source: typeof PROFILE_VERSION_SOURCE.PHASE;
@@ -213,6 +217,7 @@ export type BulkProfileOverwriteResult = {
   profile: ProfileData;
   modelsAssigned: number;
   effortsAssigned: number;
+  agentsChanged: number;
   changed: boolean;
 };
 
@@ -308,4 +313,3 @@ export type ImportProfilesResult = {
 export type ParsedProfileImport =
   | { type: "single"; name?: string; data: ProfileData }
   | { type: "bundle"; activeProfile?: string; profiles: Record<string, ProfileData> };
-
