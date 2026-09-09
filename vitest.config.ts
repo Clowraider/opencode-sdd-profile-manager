@@ -4,7 +4,20 @@ import { configDefaults, defineConfig } from "vitest/config";
 export const HOST_VITEST_EXCLUDE = ["plugins/**", "dist/**"];
 
 export default defineConfig({
+	resolve: {
+		conditions: ["browser", "module", "import"],
+	},
+	ssr: {
+		resolve: {
+			conditions: ["browser", "module", "import"],
+		},
+	},
 	test: {
+		server: {
+			deps: {
+				inline: ["solid-js"],
+			},
+		},
 		exclude: [...configDefaults.exclude, ...HOST_VITEST_EXCLUDE],
 		coverage: {
 			provider: "v8",
