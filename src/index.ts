@@ -7,12 +7,15 @@
  */
 
 export * from "./config";
+export * from "./import-export";
 export {
 	registerDialogCallbacks,
 	showCreateProfile,
 	showProfileDetail,
 	showProfileList,
 	showProfilesMenu,
+	showImportExportMenu,
+	showExportProfile,
 	showProjectMemoriesMenu,
 } from "./dialogs";
 export * from "./memories";
