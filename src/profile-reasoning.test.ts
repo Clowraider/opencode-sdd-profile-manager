@@ -36,14 +36,14 @@ describe("profile reasoning helpers", () => {
       },
     ];
 
-    it("returns selectable with unique options when metadata supports reasoning", () => {
+    it("returns selectable with unique options and provider-default when metadata supports reasoning", () => {
       const state = buildReasoningEditState(providers as any, "sdd-apply", "openai/gpt-5", "low");
 
       expect(state).toEqual({
         kind: "selectable",
         agentName: "sdd-apply",
         modelId: "openai/gpt-5",
-        options: ["high", "low"],
+        options: [PROVIDER_DEFAULT_REASONING_EFFORT, "high", "low"],
         current: "low",
       });
     });
@@ -103,7 +103,7 @@ describe("profile reasoning helpers", () => {
         kind: "selectable",
         agentName: "sdd-apply",
         modelId: "openai/gpt-5",
-        options: ["high", "low"],
+        options: [PROVIDER_DEFAULT_REASONING_EFFORT, "high", "low"],
       });
     });
   });

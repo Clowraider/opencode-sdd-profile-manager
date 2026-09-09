@@ -186,8 +186,9 @@ export function buildProfileAgentRows(
 
 export function buildReasoningRowForAgent(profileData: any, agentName: string): { title: string; value: string; category: string } {
   const saved = profileData?.configs?.[agentName]?.reasoningEffort;
+  const displayEffort = saved ? localizedEffortLabel(saved) : UI_TEXT.defaultEffort;
   return {
-    title: `${agentName}: ${saved || "Sin asignar"}`,
+    title: `${agentName}: ${displayEffort}`,
     value: `reasoning:${agentName}`,
     category: catalogCategory(agentName),
   };

@@ -236,7 +236,10 @@ describe('dialog pure builders', () => {
     });
 
     const withoutValue = buildReasoningRowForAgent({}, 'sdd-apply');
-    expect(withoutValue.title).toBe('sdd-apply: Sin asignar');
+    expect(withoutValue.title).toBe('sdd-apply: Predeterminado');
+
+    const withSentinel = buildReasoningRowForAgent({ configs: { 'sdd-apply': { reasoningEffort: 'provider-default' } } }, 'sdd-apply');
+    expect(withSentinel.title).toBe('sdd-apply: Predeterminado');
   });
 
   it('returns explicit blocked messages for missing-model and unsupported states', () => {
@@ -790,6 +793,37 @@ describe('dialog pure builders', () => {
       expect(returnToTarget).toHaveBeenCalledWith(api, profileOpt, 'hub');
     });
 
+    it('commits a sequential choice of provider-default and confirms model plus Predeterminado effort', () => {
+      const api = createFlowApi(), commitModel = vi.fn(), returnToTarget = vi.fn();
+      const props = createReasoningEffortPickerDialogProps(
+        api,
+        profileOpt,
+        'sdd-apply',
+        '/mock/profiles/team.json',
+        { models: { 'sdd-apply': 'openai/gpt-5' } },
+        { kind: 'selectable', options: ['provider-default', 'high', 'low'] },
+        'primary',
+        { sequential: true, pending: { agentName: 'sdd-apply', field: 'primary', modelId: 'openai/gpt-5' }, commitPendingModelSelection: commitModel },
+        { returnToProfileDetailTarget: returnToTarget },
+      );
+
+      expect(props.options[0]).toEqual({ title: 'Predeterminado', value: 'provider-default' });
+      props.onSelect({ value: 'provider-default' });
+      expect(commitModel).toHaveBeenCalledWith(
+        '/mock/profiles/team.json',
+        { agentName: 'sdd-apply', field: 'primary', modelId: 'openai/gpt-5' },
+        'provider-default',
+        expect.anything(),
+        buildModelMutationContext(api, 'primary'),
+      );
+      expect(api.ui.toast).toHaveBeenCalledWith({
+        title: 'Actualizado',
+        message: 'sdd-apply: modelo openai/gpt-5 y esfuerzo Predeterminado actualizados',
+        variant: 'success',
+      });
+      expect(returnToTarget).toHaveBeenCalledWith(api, profileOpt, 'primary');
+    });
+
     it('clears effort on picker back and cancel, then returns to the stable caller target', () => {
       const api = createFlowApi(), returnToTarget = vi.fn();
       const deps = { updateProfileReasoningWithoutVersion: vi.fn(), returnToProfileDetailTarget: returnToTarget };
@@ -878,6 +912,35 @@ describe('dialog pure builders', () => {
       expect(api.ui.toast).toHaveBeenCalledWith({
         title: 'Actualizado',
         message: '19 agentes configurados con openai/gpt-5 y esfuerzo high. Versión guardada.',
+        variant: 'success',
+      });
+      expect(showDetail).toHaveBeenCalledWith(api, profileOpt);
+    });
+
+    it('offers Predeterminado in bulk picker and commits provider-default transaction with localized toast', () => {
+      const api = createFlowApi();
+      const updateBulk = vi.fn().mockReturnValue({ assignment: { modelsAssigned: 7, effortsAssigned: 7, changed: true } });
+      const showDetail = vi.fn();
+      const props = createBulkReasoningEffortPickerDialogProps(api, profileOpt, 'openai/gpt-5', {
+        collectConfigurableProfileTargets: vi.fn(() => [{ profileKey: 'sdd-spec', field: 'model' as const }]),
+        updateProfileWithBulkOverwrite: updateBulk,
+        showProfileDetail: showDetail,
+      });
+
+      expect(props.options[0]).toEqual({ title: 'Predeterminado', value: 'provider-default' });
+      props.onSelect({ value: 'provider-default' });
+
+      expect(updateBulk).toHaveBeenCalledWith(
+        expect.any(String),
+        [{ profileKey: 'sdd-spec', field: 'model' }],
+        'openai/gpt-5',
+        'provider-default',
+        buildBulkModelMutationContext(api, ['sdd-spec']),
+        expect.anything(),
+      );
+      expect(api.ui.toast).toHaveBeenCalledWith({
+        title: 'Actualizado',
+        message: '7 agentes configurados con openai/gpt-5 y esfuerzo Predeterminado. Versión guardada.',
         variant: 'success',
       });
       expect(showDetail).toHaveBeenCalledWith(api, profileOpt);
