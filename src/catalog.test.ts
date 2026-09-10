@@ -121,6 +121,48 @@ describe("catalog SSOT & validation", () => {
     });
   });
 
+  describe("primary bulk target projection", () => {
+    const catalogNames = EXPECTED_CATALOG_GROUPS.flat().filter((name) => name !== "sdd-ORCHETATOR");
+
+    it.each([undefined, {}, { agent: {} }, { agent: [] }])("includes the complete catalog without synthesizing an orchestrator for %j", (config) => {
+      expect(collectConfigurableProfileTargets(config)).toEqual(
+        catalogNames.map((profileKey) => ({ field: "model", profileKey })),
+      );
+    });
+
+    it("adds valid own runtime custom primaries once without relaxing inventory exclusions", () => {
+      const agent = Object.assign(Object.create({ "inherited-agent": {} }), {
+        "sdd-init": {}, "model-audit": {}, "security-scanner": {}, "sdd-future": {},
+        compaction: {}, general: {}, build: {}, plan: {}, explore: {},
+        "gentle-reviewer": {}, "gentle-worker": {}, "sdd-apply-fallback": {},
+        "custom-fallback": {}, "invalid/key": {}, constructor: {},
+      });
+      const targets = collectConfigurableProfileTargets({ agent });
+      expect(targets).toEqual([...catalogNames, "sdd-future", "security-scanner"]
+        .map((profileKey) => ({ field: "model", profileKey })));
+      expect(new Set(targets.map(({ profileKey }) => profileKey)).size).toBe(targets.length);
+      expect(collectRuntimeAgentInventory({ agent }).map(({ runtimeName }) => runtimeName)).not.toContain("compaction");
+    });
+
+    it.each([
+      [["gentle-orchestrator"], undefined, "gentle-orchestrator"],
+      [["sdd-orchestrator"], undefined, "sdd-orchestrator"],
+      [["sdd-orchestrator", "gentle-orchestrator", "sdd-ORCHETATOR"], undefined, "gentle-orchestrator"],
+      [[], "gentle-orchestrator", undefined],
+      [[], "sdd-orchestrator", undefined],
+      [["sdd-orchestrator"], "gentle-orchestrator", undefined],
+      [["sdd-ORCHETATOR"], undefined, undefined],
+    ])("resolves only a present canonical alias: %j, default %s", (names, defaultAgent, canonical) => {
+      const targets = collectConfigurableProfileTargets({
+        agent: Object.fromEntries((names as string[]).map((name) => [name, {}])),
+        default_agent: defaultAgent,
+      });
+      expect(targets.map(({ profileKey }) => profileKey)).toEqual(
+        canonical ? [canonical, ...catalogNames] : catalogNames,
+      );
+    });
+  });
+
   describe("fallback bulk target projection", () => {
     it("projects the exact canonical 19 fallbacks even when they are absent from runtime config", () => {
       const targets = collectConfigurableProfileTargets({

@@ -940,6 +940,37 @@ describe('dialog pure builders', () => {
       expect(updateBulk).not.toHaveBeenCalled();
     });
 
+    it('passes the complete global catalog through model then effort selection with auxiliary group parity', () => {
+      const api = createFlowApi();
+      api.state.config.agent = { 'security-scanner': {}, 'model-audit': {} } as any;
+      const updateBulk = vi.fn().mockReturnValue({ assignment: { agentsChanged: 25, changed: true } });
+      const showDetail = vi.fn();
+      const showEffort = vi.fn((flowApi, selectedProfile, modelId) => {
+        return createBulkReasoningEffortPickerDialogProps(flowApi, selectedProfile, modelId, {
+          updateProfileWithBulkOverwrite: updateBulk,
+          showProfileDetail: showDetail,
+        });
+      });
+      createBulkModelSelectionHandler(api, profileOpt, 'openai/gpt-5', {
+        showBulkReasoningEffortPicker: showEffort,
+        updateProfileWithBulkOverwrite: updateBulk,
+      })();
+      expect(updateBulk).not.toHaveBeenCalled();
+      showEffort.mock.results[0].value.onSelect({ value: 'high' });
+
+      expect(updateBulk).toHaveBeenCalledTimes(1);
+      const targets = updateBulk.mock.calls[0][1];
+      expect(targets).toEqual([
+        ...CATALOG_GROUPS.flatMap((group) => group.agents).filter((key) => key !== 'sdd-ORCHETATOR'),
+        'security-scanner',
+      ].map((profileKey) => ({ field: 'model', profileKey })));
+      const auxiliaryTargets = collectBulkActionTargets(api.state.config, { groupId: 'auxiliaries' });
+      expect(targets.filter((target: any) => auxiliaryTargets.some(({ profileKey }) => profileKey === target.profileKey)))
+        .toEqual(auxiliaryTargets);
+      expect(updateBulk.mock.calls[0].slice(2, 4)).toEqual(['openai/gpt-5', 'high']);
+      expect(showDetail).toHaveBeenCalledWith(api, profileOpt);
+    });
+
     it('commits one fallback bulk transaction only after effort selection and confirms model plus effort', () => {
       const api = createFlowApi();
       const updateBulk = vi.fn().mockReturnValue({ assignment: { modelsAssigned: 19, effortsAssigned: 19, agentsChanged: 19, changed: true } });

@@ -40,7 +40,7 @@ import {
    migrateProfilesForRuntimePolicy
 } from './profiles';
 import { getOrchestratorPolicy } from './orchestrator';
-import { collectConfigurableProfileTargets } from './catalog';
+import { collectConfigurableProfileTargets, PERSISTIBLE_AGENT_KEYS } from './catalog';
 
 const toPosix = (p: any) => (typeof p === 'string' ? p.replace(/\\/g, '/') : p);
 
@@ -1054,21 +1054,16 @@ describe('profiles logic', () => {
       },
     };
 
-    it('derives every configurable primary target from runtime inventory and excludes internal or fallback entries', () => {
+    it('derives the full catalog plus runtime custom primaries while excluding noncatalog reserved and fallback entries', () => {
       const targets = collectConfigurableProfileTargets(configurableRuntime);
 
-      expect(targets.map((target) => [target.field, target.profileKey])).toEqual([
-        ['model', 'gentle-orchestrator'],
-        ['model', 'sdd-apply'],
-        ['model', 'jd-judge-a'],
-        ['model', 'review-risk'],
-        ['model', 'model-audit'],
-        ['model', 'gentle-ai-windows-validator'],
-        ['model', 'security-scanner'],
-      ]);
+      expect(targets).toEqual([
+        ...PERSISTIBLE_AGENT_KEYS.map((key) => key === 'sdd-ORCHETATOR' ? 'gentle-orchestrator' : key),
+        'security-scanner',
+      ].map((profileKey) => ({ field: 'model', profileKey })));
     });
 
-    it('overwrites every catalog-derived target with model and selected effort while leaving internal profile entries untouched', () => {
+    it('overwrites every catalog-derived model while clearing unsupported internal auxiliary effort', () => {
       const targets = collectConfigurableProfileTargets(configurableRuntime);
       const profile = {
         models: {
@@ -1100,9 +1095,9 @@ describe('profiles logic', () => {
         effortPolicy: 'bulk-compatible-prune',
       });
 
-      expect(result.modelsAssigned).toBe(7);
-      expect(result.effortsAssigned).toBe(7);
-      expect(result.agentsChanged).toBe(7);
+      expect(result.modelsAssigned).toBe(26);
+      expect(result.effortsAssigned).toBe(24);
+      expect(result.agentsChanged).toBe(26);
       expect(result.profile.models).toMatchObject({
         'gentle-orchestrator': 'openai/o3-mini',
         'sdd-apply': 'openai/o3-mini',
@@ -1111,7 +1106,7 @@ describe('profiles logic', () => {
         'model-audit': 'openai/o3-mini',
         'gentle-ai-windows-validator': 'openai/o3-mini',
         'security-scanner': 'openai/o3-mini',
-        compaction: 'internal/compaction',
+        compaction: 'openai/o3-mini',
       });
       expect(result.profile.configs).toMatchObject({
         'gentle-orchestrator': { reasoningEffort: 'high' },
@@ -1122,8 +1117,58 @@ describe('profiles logic', () => {
         'gentle-ai-windows-validator': { reasoningEffort: 'high' },
         'security-scanner': { reasoningEffort: 'high' },
       });
-      expect(result.profile.configs?.compaction).toEqual({ reasoningEffort: 'low' });
+      expect(result.profile.configs?.compaction).toBeUndefined();
       expect(profile.models['sdd-apply']).toBe('old/apply');
+    });
+
+    it('serializes global catalog intent, clears reserved effort, preserves unrelated data, and repeats without writes', () => {
+      const reserved = ['compaction', 'summary', 'title'];
+      const before = {
+        models: {
+          ...Object.fromEntries(reserved.map((name) => [name, `old/${name}`])),
+          'profile-only': 'keep/model',
+        },
+        fallback: { 'sdd-apply': 'keep/fallback' },
+        configs: {
+          ...Object.fromEntries(reserved.map((name) => [name, { reasoningEffort: 'low' }])),
+          'profile-only': { reasoningEffort: 'low' },
+          'sdd-apply-fallback': { reasoningEffort: 'low' },
+        },
+        description: 'Preserved profile metadata',
+      };
+      const writes: Array<{ filePath: string; content: string }> = [];
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      vi.mocked(fs.readdirSync).mockReturnValue([] as any);
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(before));
+      vi.mocked(fs.writeFileSync).mockImplementation((filePath: any, content: any) => {
+        writes.push({ filePath: toPosix(filePath), content: String(content) });
+      });
+      const overwrite = () => updateProfileWithBulkOverwrite(
+        '/mock/profiles/team.json', collectConfigurableProfileTargets({ agent: {} }), 'openai/o3-mini', 'high',
+        {
+          providers: [{ id: 'openai', models: { 'o3-mini': { capabilities: { reasoning: true }, variants: { high: { reasoningEffort: 'high' } } } } }],
+          effortPolicy: 'bulk-compatible-prune',
+        },
+      );
+      const result = overwrite();
+      expect(result.assignment.profile.configs?.['sdd-apply-fallback']).toEqual({ reasoningEffort: 'low' });
+      expect(result.version?.beforeRaw).toBe(JSON.stringify(before));
+      expect(writes).toHaveLength(2);
+      expect(writes[0].filePath).toContain('/profile-versions/team.json/');
+      expect(writes[1].filePath).toContain('/mock/profiles/team.json.tmp-');
+      const persisted = JSON.parse(writes[1].content);
+      for (const name of PERSISTIBLE_AGENT_KEYS.filter((key) => key !== 'sdd-ORCHETATOR')) {
+        expect(persisted.models[name]).toBe('openai/o3-mini');
+        expect(persisted.configs[name]?.reasoningEffort).toBe(reserved.includes(name) ? undefined : 'high');
+      }
+      expect(persisted).toMatchObject({
+        models: { 'profile-only': 'keep/model' }, fallback: before.fallback, description: before.description,
+        configs: { 'profile-only': { reasoningEffort: 'low' } },
+      });
+      vi.mocked(fs.readFileSync).mockReturnValue(writes[1].content);
+      writes.length = 0;
+      expect(overwrite()).toMatchObject({ assignment: { changed: false, agentsChanged: 0 } });
+      expect(writes).toHaveLength(0);
     });
 
     it('counts effort-only primary group changes once per agent and leaves fallback state unchanged', () => {

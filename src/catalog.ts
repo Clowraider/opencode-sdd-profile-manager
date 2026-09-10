@@ -15,6 +15,7 @@ import {
   isPrimarySddAgent,
   RESERVED_RUNTIME_AGENT_NAMES,
 } from "./utils";
+import { CATALOG_ORCHESTRATOR, getOrchestratorPolicy } from "./orchestrator";
 
 const CATALOG_AGENT_GROUPS = [
   [
@@ -266,7 +267,7 @@ export function collectRuntimeAgentInventory(config: unknown): RuntimeAgentInven
     .sort(compareInventory);
 }
 
-/** Projects runtime definitions into target-aware profile fields eligible for a bulk overwrite. */
+/** Projects catalog intent plus runtime custom primaries into bulk profile targets. */
 export function collectConfigurableProfileTargets(
   config: unknown,
   target: "primary" | "fallback" = "primary",
@@ -278,16 +279,23 @@ export function collectConfigurableProfileTargets(
       .map((profileKey) => ({ field: "fallback" as const, profileKey }));
   }
 
-  const seen = new Set<string>();
-  return collectRuntimeAgentInventory(config)
+  const runtimeAgents = isRuntimeConfigRecord(config) && config.agent &&
+    typeof config.agent === "object" && !Array.isArray(config.agent) ? config.agent : {};
+  const defaultAgent = isRuntimeConfigRecord(config) && "default_agent" in config &&
+    typeof config.default_agent === "string" ? config.default_agent : undefined;
+  const policy = getOrchestratorPolicy(Object.keys(runtimeAgents), defaultAgent);
+  const catalogNames = PERSISTIBLE_AGENT_KEYS.flatMap((profileKey) => {
+    if (profileKey !== CATALOG_ORCHESTRATOR) return [profileKey];
+    return Object.prototype.hasOwnProperty.call(runtimeAgents, policy.canonicalName)
+      ? [policy.canonicalName] : [];
+  });
+  const customNames = collectRuntimeAgentInventory(config)
     .filter((entry) => entry.classification === "primary" && entry.field === "model")
-    .filter((entry) => {
-      const key = `${entry.field}:${entry.profileKey}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .map(({ field, profileKey }) => ({ field, profileKey }));
+    .map(({ profileKey }) => profileKey)
+    .filter((profileKey) => !policy.aliasNames.some((alias) => alias === profileKey));
+
+  return [...new Set([...catalogNames, ...customNames])]
+    .map((profileKey) => ({ field: "model", profileKey }));
 }
 
 export function buildCatalogSections(config: unknown, _profileData?: ProfileData | null): Map<AgentFamily, CatalogEntry[]> {
