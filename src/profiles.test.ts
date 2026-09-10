@@ -1151,6 +1151,32 @@ describe('profiles logic', () => {
       expect(result.profile.configs?.['sdd-apply-fallback']).toEqual({ reasoningEffort: 'medium' });
     });
 
+    it('preserves opaque model IDs exactly and normalizes orchestrator aliases structurally', () => {
+      const policy = getOrchestratorPolicy(['gentle-orchestrator']);
+      const target = [{ field: 'model' as const, profileKey: 'sdd-ORCHETATOR' }];
+      const build = (profile: ProfileData) => buildBulkProfileOverwrite(
+        profile, target, 'custom/route-a/model-alpha', 'high',
+        { providers: [{ id: 'custom', models: { 'route-a/model-alpha': { capabilities: { reasoning: true }, variants: { high: { reasoningEffort: 'high' } } } } }], effortPolicy: 'bulk-compatible-prune' }, policy,
+      );
+
+      expect(build({ models: { 'sdd-orchestrator': 'custom/route-a/model-alpha' } })).toMatchObject({
+        profile: { models: { 'gentle-orchestrator': 'custom/route-a/model-alpha' } }, modelsAssigned: 0, agentsChanged: 1, changed: true,
+      });
+      expect(build({ models: { 'gentle-orchestrator': 'custom/route-b/model-alpha' } })).toMatchObject({
+        profile: { models: { 'gentle-orchestrator': 'custom/route-a/model-alpha' } }, modelsAssigned: 1,
+      });
+      expect(build({ models: {
+        'gentle-orchestrator': 'custom/model-alpha',
+        'sdd-orchestrator': 'custom/route-b/model-alpha',
+      } })).toMatchObject({
+        profile: { models: { 'gentle-orchestrator': 'custom/route-a/model-alpha' } },
+        modelsAssigned: 1, agentsChanged: 1, changed: true,
+      });
+      expect(build({ models: { 'gentle-orchestrator': 'custom/route-a/model-alpha' }, configs: { 'gentle-orchestrator': { reasoningEffort: 'high' } } })).toMatchObject({
+        modelsAssigned: 0, effortsAssigned: 0, agentsChanged: 0, changed: false,
+      });
+    });
+
     it('uses provider-default for unsupported reasoning and deduplicates target field/profile-key pairs', () => {
       const result = buildBulkProfileOverwrite({
         models: { 'sdd-apply': 'old/apply', compaction: 'internal/compaction' },
@@ -1495,6 +1521,39 @@ describe('profiles logic', () => {
         target: BULK_ASSIGNMENT_TARGET.BOTH,
         mode: BULK_ASSIGNMENT_MODE.FILL_ONLY,
       });
+    });
+
+    it.each([
+      [{ groupId: '  sdd-core  ', groupLabel: '  Core SDD  ' }, { groupId: 'sdd-core', groupLabel: 'Core SDD' }],
+      [{}, {}],
+    ])('accepts atomic persisted group metadata %#', (group, expected) => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+        version: 1,
+        id: 'team.json/2026-04-26T10-00-00-000Z-a.json',
+        profileFile: 'team.json',
+        createdAt: '2026-04-26T10:00:00.000Z',
+        source: PROFILE_VERSION_SOURCE.BULK,
+        operation: { ...operation, ...group },
+        operationSummary: 'Bulk fill both',
+        beforeRaw: '{}',
+        preview: { models: {}, fallback: {} },
+      }));
+
+      expect(readProfileVersion('team.json/2026-04-26T10-00-00-000Z-a.json').operation).toMatchObject(expected);
+    });
+
+    it.each([{ groupId: 'sdd-core' }, { groupLabel: 'Core SDD' }])('rejects one-sided persisted group metadata %#', (group) => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+        version: 1,
+        id: 'team.json/2026-04-26T10-00-00-000Z-a.json',
+        profileFile: 'team.json', createdAt: '2026-04-26T10:00:00.000Z',
+        source: PROFILE_VERSION_SOURCE.BULK, operation: { ...operation, ...group },
+        operationSummary: 'Bulk fill both', beforeRaw: '{}', preview: { models: {}, fallback: {} },
+      }));
+
+      expect(() => readProfileVersion('team.json/2026-04-26T10-00-00-000Z-a.json')).toThrow('Invalid profile version data');
     });
 
     it('prunes profile versions to the newest 60 snapshots', () => {

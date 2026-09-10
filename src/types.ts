@@ -168,7 +168,9 @@ export type BulkProfileVersionOperation = BulkAssignmentOperation & {
   groupLabel?: string;
 };
 
-export type BulkAssignmentGroupMetadata = Pick<BulkProfileVersionOperation, "groupId" | "groupLabel">;
+export type BulkAssignmentGroupMetadata =
+  | { groupId: string; groupLabel: string }
+  | { groupId?: never; groupLabel?: never };
 
 export type PhaseProfileVersionOperation = {
   source: typeof PROFILE_VERSION_SOURCE.PHASE;

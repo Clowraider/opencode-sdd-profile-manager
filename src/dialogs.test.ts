@@ -216,8 +216,8 @@ describe('dialog pure builders', () => {
   });
 
   it('reports distinct changed agents for effort-only and combined bulk changes', () => {
-    expect(getBulkChangedAgentCount({ modelsAssigned: 0, effortsAssigned: 2, agentsChanged: 2 })).toBe(2);
-    expect(getBulkChangedAgentCount({ modelsAssigned: 2, effortsAssigned: 2, agentsChanged: 2 })).toBe(2);
+    expect(getBulkChangedAgentCount({ agentsChanged: 2 })).toBe(2);
+    expect(getBulkChangedAgentCount({ agentsChanged: 0 })).toBe(0);
   });
 
   it('formats profile version previews with date, operation, assignments, and raw excerpt', () => {
@@ -922,7 +922,7 @@ describe('dialog pure builders', () => {
 
     it('commits one fallback bulk transaction only after effort selection and confirms model plus effort', () => {
       const api = createFlowApi();
-      const updateBulk = vi.fn().mockReturnValue({ assignment: { modelsAssigned: 19, effortsAssigned: 19, changed: true } });
+      const updateBulk = vi.fn().mockReturnValue({ assignment: { modelsAssigned: 19, effortsAssigned: 19, agentsChanged: 19, changed: true } });
       const showDetail = vi.fn();
       const props = createBulkReasoningEffortPickerDialogProps(api, profileOpt, 'openai/gpt-5', {
         collectConfigurableProfileTargets: vi.fn(() => [{ profileKey: 'sdd-spec', field: 'model' as const }]),
@@ -953,7 +953,7 @@ describe('dialog pure builders', () => {
 
     it('offers Predeterminado in bulk picker and commits provider-default transaction with localized toast', () => {
       const api = createFlowApi();
-      const updateBulk = vi.fn().mockReturnValue({ assignment: { modelsAssigned: 7, effortsAssigned: 7, changed: true } });
+      const updateBulk = vi.fn().mockReturnValue({ assignment: { modelsAssigned: 7, effortsAssigned: 7, agentsChanged: 7, changed: true } });
       const showDetail = vi.fn();
       const props = createBulkReasoningEffortPickerDialogProps(api, profileOpt, 'openai/gpt-5', {
         collectConfigurableProfileTargets: vi.fn(() => [{ profileKey: 'sdd-spec', field: 'model' as const }]),
@@ -987,7 +987,7 @@ describe('dialog pure builders', () => {
         'sdd-apply': {},
         'review-risk': {},
       } as any;
-      const updateBulk = vi.fn().mockReturnValue({ assignment: { modelsAssigned: 2, effortsAssigned: 2, changed: true } });
+      const updateBulk = vi.fn().mockReturnValue({ assignment: { modelsAssigned: 2, effortsAssigned: 2, agentsChanged: 2, changed: true } });
       const showDetail = vi.fn();
       const action = buildBulkProfileActionOptions().find((option) => option.groupId === 'sdd-core')!;
       const props = createBulkReasoningEffortPickerDialogProps(

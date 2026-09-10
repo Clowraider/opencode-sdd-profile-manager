@@ -67,7 +67,7 @@ import {
 } from "./import-export";
 import type { ImportConflictResolution } from "./types";
 import { createLogger } from "./logger";
-import { canonicalizeProfileModels, getOrchestratorPolicy, type OrchestratorPolicy } from "./orchestrator";
+import { canonicalizeProfileModels, CATALOG_ORCHESTRATOR, getOrchestratorPolicy, type OrchestratorPolicy } from "./orchestrator";
 import { buildPluginHubOptions } from "./plugins/registry";
 import { loadOfflineHelp, type HelpTopic } from "./plugins/offline-help";
 import { openVendoredSuite } from "./plugins/suite-adapter";
@@ -578,7 +578,7 @@ export function collectBulkActionTargets(
   if (!group || target !== "primary") return [];
   const policy = resolveRuntimeOrchestratorPolicy(config);
   const groupKeys = new Set<string>(group.agents);
-  if ((group.agents as readonly string[]).includes("sdd-ORCHETATOR")) {
+  if ((group.agents as readonly string[]).includes(CATALOG_ORCHESTRATOR)) {
     for (const alias of policy.aliasNames) groupKeys.add(alias);
   }
   const filteredTargets = targets.filter((profileTarget) =>
@@ -589,7 +589,7 @@ export function collectBulkActionTargets(
     ? config.agent as Record<string, unknown>
     : {};
   if (
-    (group.agents as readonly string[]).includes("sdd-ORCHETATOR") &&
+    (group.agents as readonly string[]).includes(CATALOG_ORCHESTRATOR) &&
     Object.prototype.hasOwnProperty.call(runtimeAgents, policy.canonicalName) &&
     !filteredTargets.some((profileTarget) => profileTarget.profileKey === policy.canonicalName)
   ) {
@@ -598,8 +598,8 @@ export function collectBulkActionTargets(
   return filteredTargets;
 }
 
-export function getBulkChangedAgentCount(assignment: Pick<BulkProfileOverwriteResult, "modelsAssigned" | "effortsAssigned"> & { agentsChanged?: number }): number {
-  return assignment.agentsChanged ?? Math.max(assignment.modelsAssigned, assignment.effortsAssigned);
+export function getBulkChangedAgentCount(assignment: Pick<BulkProfileOverwriteResult, "agentsChanged">): number {
+  return assignment.agentsChanged;
 }
 
 export function formatProfileVersionPreviewLines(version: ProfileVersion): string[] {
@@ -1404,7 +1404,7 @@ export function createBulkReasoningEffortPickerDialogProps(
         }
         const context = buildBulkModelMutationContext(api, runtimePrimaryNames);
         const policy = resolveRuntimeOrchestratorPolicy(api.state.config);
-        const result = action?.groupId
+        const result = action?.groupId && action.groupLabel
           ? updateBulk(profilePath, targets, modelId, opt.value, context, policy, "primary", {
               groupId: action.groupId,
               groupLabel: action.groupLabel,

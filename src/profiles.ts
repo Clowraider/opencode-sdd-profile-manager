@@ -636,10 +636,12 @@ function normalizePersistedBulkVersionOperation(operation: unknown): BulkProfile
   ) {
     return null;
   }
-  if (
-    (operation.groupId !== undefined && (typeof operation.groupId !== "string" || !operation.groupId.trim())) ||
-    (operation.groupLabel !== undefined && (typeof operation.groupLabel !== "string" || !operation.groupLabel.trim()))
-  ) {
+  const hasGroupId = operation.groupId !== undefined;
+  const hasGroupLabel = operation.groupLabel !== undefined;
+  if (hasGroupId !== hasGroupLabel || (hasGroupId && (
+    typeof operation.groupId !== "string" || !operation.groupId.trim() ||
+    typeof operation.groupLabel !== "string" || !operation.groupLabel.trim()
+  ))) {
     return null;
   }
 
@@ -647,8 +649,7 @@ function normalizePersistedBulkVersionOperation(operation: unknown): BulkProfile
     {
       target: operation.target,
       mode: operation.mode,
-      ...(typeof operation.groupId === "string" ? { groupId: operation.groupId.trim() } : {}),
-      ...(typeof operation.groupLabel === "string" ? { groupLabel: operation.groupLabel.trim() } : {}),
+      ...(hasGroupId ? { groupId: String(operation.groupId).trim(), groupLabel: String(operation.groupLabel).trim() } : {}),
     },
     typeof operation.changedPhases === "number" ? operation.changedPhases : undefined
   );
@@ -964,12 +965,11 @@ export function buildBulkProfileOverwrite(
   runtimePolicy?: OrchestratorPolicy,
   target: "primary" | "fallback" = BULK_ASSIGNMENT_TARGET.PRIMARY,
 ): BulkProfileOverwriteResult {
-  const trimmedModelId = modelId?.trim();
-  if (!trimmedModelId) throw new Error("modelId must be a non-empty string");
+  if (!modelId?.trim()) throw new Error("modelId must be a non-empty string");
 
   const uniqueTargets = deduplicateBulkProfileTargets(targets);
   const policy = runtimePolicy ?? getOrchestratorPolicy(Object.keys(profile?.models || {}));
-  const reasoningEffort = resolveBulkReasoningEffort(context, trimmedModelId, effortSelection);
+  const reasoningEffort = resolveBulkReasoningEffort(context, modelId, effortSelection);
   const nextModels = { ...profile?.models };
   const nextFallback = { ...profile?.fallback };
   const nextConfigs = { ...profile?.configs };
@@ -984,16 +984,21 @@ export function buildBulkProfileOverwrite(
       ? policy.canonicalName
       : profileTarget.profileKey;
     const modelMap = target === BULK_ASSIGNMENT_TARGET.FALLBACK ? nextFallback : nextModels;
+    const aliasNames = policy.aliasNames.filter((aliasName) => aliasName !== policy.canonicalName);
+    const canonicalModel = nextModels[policy.canonicalName];
     const currentModel = target === BULK_ASSIGNMENT_TARGET.PRIMARY && isOrchestrator
-      ? policy.aliasNames.map((aliasName) => nextModels[aliasName]).find((value) => typeof value === "string")
+      ? canonicalModel ?? aliasNames.map((aliasName) => nextModels[aliasName]).find((value) => typeof value === "string")
       : modelMap[targetName];
-    const modelChanged = currentModel !== trimmedModelId;
+    const modelChanged = currentModel !== modelId;
     const configKey = target === BULK_ASSIGNMENT_TARGET.FALLBACK ? `${targetName}-fallback` : targetName;
     const currentEffort = target === BULK_ASSIGNMENT_TARGET.PRIMARY && isOrchestrator
-      ? policy.aliasNames.map((aliasName) => nextConfigs[aliasName]?.reasoningEffort).find((value) => typeof value === "string")
+      ? nextConfigs[policy.canonicalName]?.reasoningEffort
       : nextConfigs[configKey]?.reasoningEffort;
+    const structuralAliasCleanup = target === BULK_ASSIGNMENT_TARGET.PRIMARY && isOrchestrator && aliasNames.some((aliasName) =>
+      Object.prototype.hasOwnProperty.call(nextModels, aliasName) || Object.prototype.hasOwnProperty.call(nextConfigs, aliasName)
+    );
     if (target === BULK_ASSIGNMENT_TARGET.PRIMARY && isOrchestrator) {
-      for (const aliasName of policy.aliasNames) {
+      for (const aliasName of aliasNames) {
         delete nextModels[aliasName];
         delete nextConfigs[aliasName];
       }
@@ -1016,8 +1021,8 @@ export function buildBulkProfileOverwrite(
         }
       }
     }
-    modelMap[targetName] = trimmedModelId;
-    if (modelChanged || effortChanged) changedAgents.add(`${target}:${targetName}`);
+    modelMap[targetName] = modelId;
+    if (modelChanged || effortChanged || structuralAliasCleanup) changedAgents.add(`${target}:${targetName}`);
   }
 
   const { configs: _ignoredConfigs, ...profileWithoutConfigs } = profile || { models: {} };
