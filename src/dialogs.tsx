@@ -571,31 +571,21 @@ export function collectBulkActionTargets(
   collectTargets: typeof collectConfigurableProfileTargets = collectConfigurableProfileTargets,
 ): ConfigurableProfileTarget[] {
   const target = action.target || "primary";
-  const targets = collectTargets(config, target);
-  if (!action.groupId) return targets;
+  if (!action.groupId) return collectTargets(config, target);
 
   const group = CATALOG_GROUPS.find((candidate) => candidate.id === action.groupId);
   if (!group || target !== "primary") return [];
   const policy = resolveRuntimeOrchestratorPolicy(config);
-  const groupKeys = new Set<string>(group.agents);
-  if ((group.agents as readonly string[]).includes(CATALOG_ORCHESTRATOR)) {
-    for (const alias of policy.aliasNames) groupKeys.add(alias);
-  }
-  const filteredTargets = targets.filter((profileTarget) =>
-    profileTarget.field === "model" && groupKeys.has(profileTarget.profileKey)
-  );
   const runtimeAgents = (config && typeof config === "object" && !Array.isArray(config) &&
     "agent" in config && config.agent && typeof config.agent === "object" && !Array.isArray(config.agent))
     ? config.agent as Record<string, unknown>
     : {};
-  if (
-    (group.agents as readonly string[]).includes(CATALOG_ORCHESTRATOR) &&
-    Object.prototype.hasOwnProperty.call(runtimeAgents, policy.canonicalName) &&
-    !filteredTargets.some((profileTarget) => profileTarget.profileKey === policy.canonicalName)
-  ) {
-    filteredTargets.push({ field: "model", profileKey: policy.canonicalName });
-  }
-  return filteredTargets;
+  return group.agents.flatMap((profileKey): ConfigurableProfileTarget[] => {
+    if (profileKey !== CATALOG_ORCHESTRATOR) return [{ field: "model", profileKey }];
+    return Object.prototype.hasOwnProperty.call(runtimeAgents, policy.canonicalName)
+      ? [{ field: "model", profileKey: policy.canonicalName }]
+      : [];
+  });
 }
 
 export function getBulkChangedAgentCount(assignment: Pick<BulkProfileOverwriteResult, "agentsChanged">): number {

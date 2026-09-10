@@ -41,30 +41,24 @@ const EXPECTED_FALLBACK_ORDER: readonly string[] = [
 ] as const;
 
 const EXPECTED_CATALOG_GROUPS: readonly (readonly string[])[] = [
-  ["sdd-ORCHETATOR"],
   [
+    "sdd-ORCHETATOR",
     "sdd-propose",
     "sdd-design",
     "sdd-apply",
     "sdd-verify",
-    "sdd-spec",
-    "sdd-onboard",
-    "sdd-explore",
-    "sdd-init",
-    "sdd-tasks",
-    "sdd-archive",
-  ],
-  ["jd-judge-a", "jd-judge-b", "jd-fix-agent"],
-  [
-    "review-readability",
+    "review-risk",
     "review-reliability",
     "review-resilience",
-    "review-validator",
     "review-refuter",
-    "review-risk",
-    "model-audit",
+    "review-validator",
+    "jd-judge-a",
+    "jd-judge-b",
+    "jd-fix-agent",
   ],
-  ["gentle-ai-windows-validator", "compaction", "summary", "title"],
+  ["sdd-explore", "sdd-spec", "sdd-tasks", "review-readability"],
+  ["sdd-init", "sdd-archive", "sdd-onboard"],
+  ["model-audit", "gentle-ai-windows-validator", "compaction", "summary", "title"],
 ] as const;
 
 const EXPECTED_RUNTIME_SYNC_KEYS = EXPECTED_CATALOG_GROUPS.flat().filter(
@@ -73,8 +67,14 @@ const EXPECTED_RUNTIME_SYNC_KEYS = EXPECTED_CATALOG_GROUPS.flat().filter(
 
 describe("catalog SSOT & validation", () => {
   describe("grouped catalog views (Unit 1)", () => {
-    it("defines five ordered groups with every approved agent in exact sequence", () => {
-      expect(CATALOG_GROUPS).toHaveLength(5);
+    it("defines four ordered groups with every approved agent in exact sequence", () => {
+      expect(CATALOG_GROUPS).toHaveLength(4);
+      expect(CATALOG_GROUPS.map(({ id, labelEs }) => ({ id, labelEs }))).toEqual([
+        { id: "priority-high", labelEs: "🔴 Prioridad alta" },
+        { id: "priority-medium", labelEs: "🟡 Prioridad media" },
+        { id: "priority-low", labelEs: "🟢 Prioridad baja" },
+        { id: "auxiliaries", labelEs: "Auxiliares" },
+      ]);
       expect(CATALOG_GROUPS.map((group) => [...group.agents])).toEqual(EXPECTED_CATALOG_GROUPS);
       expect(PERSISTIBLE_AGENT_KEYS).toHaveLength(25);
       expect(PERSISTIBLE_AGENT_KEYS).toEqual(EXPECTED_CATALOG_GROUPS.flat());

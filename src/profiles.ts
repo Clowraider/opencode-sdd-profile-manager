@@ -54,6 +54,7 @@ import {
   isSddFallbackAgent,
   isRuntimeSyncEligibleAgent,
   isCatalogVisibleAgent,
+  RESERVED_RUNTIME_AGENT_NAMES,
   withFileLock,
 } from "./utils";
 import { FALLBACK_SYNC_BASE_ORDER, deriveFallbackProfileKey, isValidAgentKey } from "./catalog";
@@ -991,6 +992,7 @@ export function buildBulkProfileOverwrite(
       : modelMap[targetName];
     const modelChanged = currentModel !== modelId;
     const configKey = target === BULK_ASSIGNMENT_TARGET.FALLBACK ? `${targetName}-fallback` : targetName;
+    const canStoreReasoning = target === BULK_ASSIGNMENT_TARGET.FALLBACK || isOrchestrator || !RESERVED_RUNTIME_AGENT_NAMES.has(targetName);
     const currentEffort = target === BULK_ASSIGNMENT_TARGET.PRIMARY && isOrchestrator
       ? nextConfigs[policy.canonicalName]?.reasoningEffort
       : nextConfigs[configKey]?.reasoningEffort;
@@ -1005,7 +1007,7 @@ export function buildBulkProfileOverwrite(
     }
     if (modelChanged) modelsAssigned += 1;
     let effortChanged = false;
-    if (reasoningEffort) {
+    if (reasoningEffort && canStoreReasoning) {
       effortChanged = currentEffort !== reasoningEffort;
       if (effortChanged) effortsAssigned += 1;
       nextConfigs[configKey] = { ...nextConfigs[configKey], reasoningEffort };

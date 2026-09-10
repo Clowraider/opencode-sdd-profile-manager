@@ -193,7 +193,7 @@ describe('dialog pure builders', () => {
     })));
   });
 
-  it('filters a catalog group to valid runtime primary targets and preserves orchestrator aliases', () => {
+  it('resolves complete catalog groups and preserves only the canonical runtime orchestrator alias', () => {
     const config = { agent: {
       'gentle-orchestrator': {},
       'sdd-init': {},
@@ -202,16 +202,36 @@ describe('dialog pure builders', () => {
       compaction: {},
     } };
 
-    expect(collectBulkActionTargets(config, { target: 'primary', groupId: 'sdd-core' })).toEqual([
-      { profileKey: 'sdd-init', field: 'model' },
-      { profileKey: 'sdd-apply', field: 'model' },
-    ]);
-    expect(collectBulkActionTargets(config, { target: 'primary', groupId: 'orchestrator' })).toEqual([
+    expect(collectBulkActionTargets(config, { target: 'primary', groupId: 'priority-high' })).toEqual([
       { profileKey: 'gentle-orchestrator', field: 'model' },
+      { profileKey: 'sdd-propose', field: 'model' },
+      { profileKey: 'sdd-design', field: 'model' },
+      { profileKey: 'sdd-apply', field: 'model' },
+      { profileKey: 'sdd-verify', field: 'model' },
+      { profileKey: 'review-risk', field: 'model' },
+      { profileKey: 'review-reliability', field: 'model' },
+      { profileKey: 'review-resilience', field: 'model' },
+      { profileKey: 'review-refuter', field: 'model' },
+      { profileKey: 'review-validator', field: 'model' },
+      { profileKey: 'jd-judge-a', field: 'model' },
+      { profileKey: 'jd-judge-b', field: 'model' },
+      { profileKey: 'jd-fix-agent', field: 'model' },
     ]);
-    expect(collectBulkActionTargets({ agent: { 'sdd-orchestrator': {} } }, { target: 'primary', groupId: 'orchestrator' })).toEqual([
+    expect(collectBulkActionTargets(config, { target: 'primary', groupId: 'priority-low' })).toEqual([
+      { profileKey: 'sdd-init', field: 'model' },
+      { profileKey: 'sdd-archive', field: 'model' },
+      { profileKey: 'sdd-onboard', field: 'model' },
+    ]);
+    expect(collectBulkActionTargets({}, { target: 'primary', groupId: 'auxiliaries' })).toEqual([
+      { profileKey: 'model-audit', field: 'model' },
+      { profileKey: 'gentle-ai-windows-validator', field: 'model' },
+      { profileKey: 'compaction', field: 'model' },
+      { profileKey: 'summary', field: 'model' },
+      { profileKey: 'title', field: 'model' },
+    ]);
+    expect(collectBulkActionTargets({}, { target: 'primary', groupId: 'priority-high' })).not.toContainEqual(
       { profileKey: 'sdd-orchestrator', field: 'model' },
-    ]);
+    );
     expect(collectBulkActionTargets(config, { target: 'primary', groupId: 'unknown' })).toEqual([]);
   });
 
@@ -266,7 +286,7 @@ describe('dialog pure builders', () => {
     expect(withValue).toEqual({
       title: 'sdd-apply: high',
       value: 'reasoning:sdd-apply',
-      category: 'Núcleo SDD',
+      category: '🔴 Prioridad alta',
     });
 
     const withoutValue = buildReasoningRowForAgent({}, 'sdd-apply');
@@ -725,7 +745,7 @@ describe('dialog pure builders', () => {
       const expectedAgents = CATALOG_GROUPS.flatMap((group) => group.agents);
       expect(primary.filter((option) => option.value.startsWith('model:')).map((option) => option.value.slice(6))).toEqual(expectedAgents);
       expect(fallback.filter((option) => option.value.startsWith('fallback:')).map((option) => option.value.slice(9))).toEqual(expectedAgents.filter((agent) => agent === 'gentle-ai-windows-validator' || !['compaction', 'summary', 'title'].includes(agent)));
-      expect(CATALOG_GROUPS.map((group) => group.labelEs)).toEqual(['Orquestador', 'Núcleo SDD', 'Judgment Day', 'Revisores', 'Auxiliares']);
+      expect(CATALOG_GROUPS.map((group) => group.labelEs)).toEqual(['🔴 Prioridad alta', '🟡 Prioridad media', '🟢 Prioridad baja', 'Auxiliares']);
       expect(primary.filter((option) => option.value.startsWith('model:')).map((option) => option.category)).toEqual(CATALOG_GROUPS.flatMap((group) => group.agents.map(() => group.labelEs)));
       expect(primary.some((option) => option.value === '__catalog_separator__' || option.description === 'No seleccionable')).toBe(false);
     });
@@ -980,16 +1000,16 @@ describe('dialog pure builders', () => {
       expect(showDetail).toHaveBeenCalledWith(api, profileOpt);
     });
 
-    it('commits a primary group overwrite with only runtime-valid group targets and group version metadata', () => {
+    it('commits a complete primary catalog group with group version metadata', () => {
       const api = createFlowApi();
       api.state.config.agent = {
         'sdd-init': {},
         'sdd-apply': {},
         'review-risk': {},
       } as any;
-      const updateBulk = vi.fn().mockReturnValue({ assignment: { modelsAssigned: 2, effortsAssigned: 2, agentsChanged: 2, changed: true } });
+      const updateBulk = vi.fn().mockReturnValue({ assignment: { modelsAssigned: 12, effortsAssigned: 12, agentsChanged: 12, changed: true } });
       const showDetail = vi.fn();
-      const action = buildBulkProfileActionOptions().find((option) => option.groupId === 'sdd-core')!;
+      const action = buildBulkProfileActionOptions().find((option) => option.groupId === 'priority-high')!;
       const props = createBulkReasoningEffortPickerDialogProps(
         api,
         profileOpt,
@@ -1003,19 +1023,18 @@ describe('dialog pure builders', () => {
 
       expect(updateBulk).toHaveBeenCalledWith(
         expect.any(String),
-        [
-          { profileKey: 'sdd-init', field: 'model' },
-          { profileKey: 'sdd-apply', field: 'model' },
-        ],
+        CATALOG_GROUPS.find((group) => group.id === 'priority-high')!.agents
+          .filter((profileKey) => profileKey !== 'sdd-ORCHETATOR')
+          .map((profileKey) => ({ profileKey, field: 'model' })),
         'openai/gpt-5',
         'high',
         expect.anything(),
         expect.anything(),
         BULK_ASSIGNMENT_TARGET.PRIMARY,
-        { groupId: 'sdd-core', groupLabel: 'Núcleo SDD' },
+        { groupId: 'priority-high', groupLabel: '🔴 Prioridad alta' },
       );
       expect(api.ui.toast).toHaveBeenCalledWith(expect.objectContaining({
-        message: '2 agentes de Núcleo SDD configurados con openai/gpt-5 y esfuerzo high. Versión guardada.',
+        message: '12 agentes de 🔴 Prioridad alta configurados con openai/gpt-5 y esfuerzo high. Versión guardada.',
       }));
       expect(showDetail).toHaveBeenCalledWith(api, profileOpt);
     });
@@ -1024,7 +1043,7 @@ describe('dialog pure builders', () => {
       const api = createFlowApi();
       const updateBulk = vi.fn().mockReturnValue({ assignment: { modelsAssigned: 0, effortsAssigned: 2, agentsChanged: 2, changed: true } });
       const showDetail = vi.fn();
-      const action = buildBulkProfileActionOptions().find((option) => option.groupId === 'sdd-core')!;
+      const action = buildBulkProfileActionOptions().find((option) => option.groupId === 'priority-high')!;
       const props = createBulkReasoningEffortPickerDialogProps(api, profileOpt, 'openai/gpt-5', 'primary', {
         collectConfigurableProfileTargets: vi.fn(() => [
           { profileKey: 'sdd-init', field: 'model' as const },
@@ -1038,7 +1057,7 @@ describe('dialog pure builders', () => {
 
       expect(api.ui.toast).toHaveBeenCalledWith({
         title: 'Actualizado',
-        message: '2 agentes de Núcleo SDD configurados con openai/gpt-5 y esfuerzo high. Versión guardada.',
+        message: '2 agentes de 🔴 Prioridad alta configurados con openai/gpt-5 y esfuerzo high. Versión guardada.',
         variant: 'success',
       });
     });

@@ -17,57 +17,46 @@ import {
 } from "./utils";
 
 const CATALOG_AGENT_GROUPS = [
-  ["sdd-ORCHETATOR"],
   [
+    "sdd-ORCHETATOR",
     "sdd-propose",
     "sdd-design",
     "sdd-apply",
     "sdd-verify",
-    "sdd-spec",
-    "sdd-onboard",
-    "sdd-explore",
-    "sdd-init",
-    "sdd-tasks",
-    "sdd-archive",
-  ],
-  ["jd-judge-a", "jd-judge-b", "jd-fix-agent"],
-  [
-    "review-readability",
+    "review-risk",
     "review-reliability",
     "review-resilience",
-    "review-validator",
     "review-refuter",
-    "review-risk",
-    "model-audit",
+    "review-validator",
+    "jd-judge-a",
+    "jd-judge-b",
+    "jd-fix-agent",
   ],
-  ["gentle-ai-windows-validator", "compaction", "summary", "title"],
+  ["sdd-explore", "sdd-spec", "sdd-tasks", "review-readability"],
+  ["sdd-init", "sdd-archive", "sdd-onboard"],
+  ["model-audit", "gentle-ai-windows-validator", "compaction", "summary", "title"],
 ] as const satisfies readonly (readonly PersistibleAgentKey[])[];
 
 export const CATALOG_GROUPS = [
   {
-    id: "orchestrator",
-    labelEs: "Orquestador",
+    id: "priority-high",
+    labelEs: "🔴 Prioridad alta",
     agents: CATALOG_AGENT_GROUPS[0],
   },
   {
-    id: "sdd-core",
-    labelEs: "Núcleo SDD",
+    id: "priority-medium",
+    labelEs: "🟡 Prioridad media",
     agents: CATALOG_AGENT_GROUPS[1],
   },
   {
-    id: "judgment-day",
-    labelEs: "Judgment Day",
+    id: "priority-low",
+    labelEs: "🟢 Prioridad baja",
     agents: CATALOG_AGENT_GROUPS[2],
-  },
-  {
-    id: "reviewers",
-    labelEs: "Revisores",
-    agents: CATALOG_AGENT_GROUPS[3],
   },
   {
     id: "auxiliaries",
     labelEs: "Auxiliares",
-    agents: CATALOG_AGENT_GROUPS[4],
+    agents: CATALOG_AGENT_GROUPS[3],
   },
 ] as const satisfies readonly CatalogGroup[];
 
