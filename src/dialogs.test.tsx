@@ -118,6 +118,12 @@ describe("Task Manager Action & Integration (Unit 3)", () => {
     const api = createMockApi("C:/custom/workspace/subdir");
 
     const resolveRootSpy = vi.spyOn(rootModule, "resolveTaskManagerRoot");
+    vi.spyOn(lifecycle, "provisionTaskManagerBase").mockReturnValue({
+      created: true,
+      migrated: false,
+      path: "C:/custom/workspace/subdir/Task-Manager-Portable.html",
+      route: "foreground",
+    });
     vi.spyOn(coordinator, "launchTaskManagerBrowser").mockResolvedValue({
       opened: true,
       method: "process",
