@@ -4,12 +4,12 @@
 	"description": "Keyboard-first SDD profile, model, reasoning, fallback, and Engram management for OpenCode",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/RamonsDka/opencode-sdd-profile-manager.git"
+		"url": "git+https://github.com/Clowraider/opencode-sdd-profile-manager.git"
 	},
 	"bugs": {
-		"url": "https://github.com/RamonsDka/opencode-sdd-profile-manager/issues"
+		"url": "https://github.com/Clowraider/opencode-sdd-profile-manager/issues"
 	},
-	"homepage": "https://github.com/RamonsDka/opencode-sdd-profile-manager#readme",
+	"homepage": "https://github.com/Clowraider/opencode-sdd-profile-manager#readme",
 	"license": "MIT",
 	"type": "module",
 	"main": "./dist/tui.js",

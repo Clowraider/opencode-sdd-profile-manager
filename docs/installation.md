@@ -28,7 +28,7 @@ This guide covers installing and deploying the **OpenCode SDD Profile Manager** 
 
 GitHub Releases provide pre-compiled, verifiable distribution bundles containing `dist/tui.js`, vendored sub-plugins, documentation, and SHA-256 checksums.
 
-1. Download `sdd-profile-manager-v2.0.1.zip` (or `.tar.gz`) from [GitHub Releases](https://github.com/RamonsDka/opencode-sdd-profile-manager/releases).
+1. Download `sdd-profile-manager-v2.2.1.zip` (or `.tar.gz`) from [GitHub Releases](https://github.com/Clowraider/opencode-sdd-profile-manager/releases).
 2. Extract the archive into your local OpenCode plugins directory:
    - **Linux / macOS**: `~/.config/opencode/plugins/sdd-profile-manager`
    - **Windows**: `C:\Users\<user>\.config\opencode\plugins\sdd-profile-manager`
@@ -90,7 +90,7 @@ To build and run from the latest git checkout:
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/RamonsDka/opencode-sdd-profile-manager.git
+git clone https://github.com/Clowraider/opencode-sdd-profile-manager.git
 cd opencode-sdd-profile-manager
 
 # 2. Ensure Node.js 24 is active
